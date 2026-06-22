@@ -1,0 +1,90 @@
+/**
+ * Update routes: POST /api/update/:name, GET /api/update/:name/stream.
+ *
+ * Auth: protected by the session-cookie middleware mounted ahead of this
+ * router in index.js (see API_CONTRACT.md). This router adds no auth
+ * itself.
+ *
+ * NOTE: the actual pull + recreate work happens in docker.js's
+ * `updateContainer`, which shells out to the `docker` CLI / talks to the
+ * daemon over `DOCKER_SOCKET`. There is no Docker daemon available in this
+ * build/test environment, so the success path of POST /api/update/:name
+ * (and the resulting SSE log/result events) can only be exercised on a
+ * real host — see the work package report.
+ */
+
+import express from 'express';
+import { docker, updateContainer } from '../docker.js';
+import * as sse from '../sse.js';
+import * as db from '../db.js';
+
+export const updateRouter = express.Router();
+
+/**
+ * Runs the update + records history + finishes the SSE session, detached
+ * from the request lifecycle (the POST handler responds before this
+ * settles). Errors here must never escape as an unhandled rejection.
+ *
+ * @param {string} name
+ * @param {string|null} image - configured image ref, for the history row.
+ */
+async function runUpdate(name, image) {
+  try {
+    const result = await updateContainer(name, (line, stream) => sse.pushLog(name, line, stream));
+    db.recordUpdate({
+      container_name: name,
+      image,
+      old_digest: result.oldDigest,
+      new_digest: result.newDigest,
+      status: result.success ? 'success' : 'failure',
+      message: result.message,
+    });
+    sse.finish(name, { success: result.success, message: result.message });
+  } catch (err) {
+    db.recordUpdate({
+      container_name: name,
+      image,
+      old_digest: null,
+      new_digest: null,
+      status: 'failure',
+      message: err.message,
+    });
+    sse.finish(name, { success: false, message: err.message });
+  }
+}
+
+updateRouter.post('/api/update/:name', async (req, res) => {
+  const { name } = req.params;
+
+  let inspectData;
+  try {
+    inspectData = await docker.getContainer(name).inspect();
+  } catch (err) {
+    if (err.statusCode === 404) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    if (err.code === 'ENOENT' || err.code === 'ECONNREFUSED') {
+      return res.status(503).json({ error: 'docker_unavailable' });
+    }
+    return res.status(500).json({ error: 'internal_error', message: err.message });
+  }
+
+  if (sse.isActive(name)) {
+    return res.status(409).json({ error: 'update_in_progress' });
+  }
+
+  sse.startSession(name);
+
+  const image = inspectData.Config?.Image ?? null;
+  // Fire-and-forget: don't await, so the POST returns promptly. runUpdate
+  // catches its own errors, so this can never reject/crash the process.
+  void runUpdate(name, image);
+
+  return res.status(200).json({ streamId: name });
+});
+
+updateRouter.get('/api/update/:name/stream', (req, res) => {
+  sse.subscribe(req.params.name, res, req);
+});
+
+export default updateRouter;
