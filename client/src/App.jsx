@@ -1,13 +1,19 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { getMe } from './api.js';
+import { useTheme } from './hooks/useTheme.js';
 import AuthPage from './AuthPage.jsx';
 import Dashboard from './Dashboard.jsx';
 import Header from './components/Header.jsx';
-import HistoryStub from './pages/HistoryStub.jsx';
-import SettingsStub from './pages/SettingsStub.jsx';
+import BottomNav from './components/BottomNav.jsx';
+import HistoryPage from './pages/HistoryPage.jsx';
+import SettingsPage from './pages/SettingsPage.jsx';
 
 export default function App() {
+  // Initialized at the app level so `data-theme` is set on <html> from the
+  // first paint, before any route-specific component mounts.
+  useTheme();
+
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -52,11 +58,12 @@ export default function App() {
       <main className="app-main">
         <Routes>
           <Route path="/" element={<Dashboard onPendingCountChange={setPendingCount} />} />
-          <Route path="/history" element={<HistoryStub />} />
-          <Route path="/settings" element={<SettingsStub />} />
+          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      <BottomNav />
     </div>
   );
 }
