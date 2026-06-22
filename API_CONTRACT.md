@@ -120,6 +120,12 @@ All request/response bodies are JSON unless noted otherwise.
 - Path param: `ref` — the image ref to unpin (URL-encoded).
 - Response: `200 { "ok": true }`. Idempotent.
 
+Note: refs passed to `POST /api/pin` and `DELETE /api/pin/:ref` are
+normalized server-side (via the same `normalizeRef` used for Diun events)
+before being stored/looked up, so e.g. raw `nginx` and
+`docker.io/library/nginx:latest` are equivalent and `GET /api/pinned`
+always returns normalized refs.
+
 ### `GET /api/health`
 
 - Auth: none.

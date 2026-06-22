@@ -6,6 +6,8 @@ import cookieParser from 'cookie-parser';
 import { config, assertRequiredConfig } from './config.js';
 // Importing db creates the data dir + tables as a side effect on load.
 import './db.js';
+import { webhookRouter } from './webhook.js';
+import { apiRouter } from './routes/api.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,10 +32,21 @@ app.get('/api/health', (req, res) => {
 });
 
 // WP2/WP3: routes mounted here
-// - WP2: auth routes (POST /api/auth/login, /api/auth/logout, GET /api/auth/me)
-// - WP3: container listing + update routes (GET /api/containers, POST /api/update/:name, ...)
-// - WP3: Diun webhook route (POST /api/diun/webhook)
-// - WP3: history + pin routes (GET /api/history, GET/POST/DELETE /api/pinned, /api/pin)
+// - WP2 (done): Diun webhook route (POST /api/diun/webhook) — public, its
+//   own bearer-token auth, no session cookie.
+// - WP2 (done): container listing + history + pin routes (GET
+//   /api/containers, GET /api/history(/:name), GET /api/pinned, POST
+//   /api/pin, DELETE /api/pin/:ref) — these are meant to be protected by
+//   the session cookie per API_CONTRACT.md, but no auth is applied yet.
+// - WP3 (todo): insert session-cookie auth middleware here, BEFORE
+//   `apiRouter`, so those routes require login. Do not put it before
+//   `webhookRouter` — the webhook and /api/health must stay public.
+// - WP3 (todo): auth routes (POST /api/auth/login, /api/auth/logout, GET
+//   /api/auth/me) and update routes (POST /api/update/:name, GET
+//   /api/update/:name/stream).
+app.use(webhookRouter);
+// WP3: app.use(authMiddleware) should go here, before apiRouter.
+app.use(apiRouter);
 
 const clientDistDir = path.join(__dirname, '..', '..', 'client', 'dist');
 const clientDistExists = fs.existsSync(path.join(clientDistDir, 'index.html'));
