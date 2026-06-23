@@ -1,0 +1,51 @@
+services:
+  diun-updater:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: diun-updater
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - DIUN_WEBHOOK_TOKEN=${DIUN_WEBHOOK_TOKEN}
+      - STACKS_DIR=${STACKS_DIR}
+    volumes:
+      # Required so dockerode/the docker CLI inside the container can talk
+      # to the host's Docker daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # IMPORTANT: same-path mount.
+      # The host directory containing your compose stacks MUST be mounted at
+      # the IDENTICAL path inside this container as it has on the host.
+      # `docker compose` (run from inside this container, talking to the
+      # host daemon over the socket) resolves relative bind mounts and
+      # build contexts in your stacks' compose files against the path the
+      # *host daemon* sees on disk — which is the host path, not this
+      # container's path. If the paths differ, relative volume/bind mounts
+      # in your other stacks will silently break.
+      # Example: if your stacks live at /opt/stacks on the host, set
+      # STACKS_DIR=/opt/stacks in your .env and keep this mapping as-is.
+      - ${STACKS_DIR}:${STACKS_DIR}
+      # Persistent SQLite database (events, update history, pinned refs).
+      - diun-updater-data:/data
+
+volumes:
+  diun-updater-data:
+
+# ---------------------------------------------------------------------------
+# Diun webhook notifier configuration
+# ---------------------------------------------------------------------------
+# Add a webhook notifier to your Diun config so it pushes update events to
+# this app:
+#
+# notif:
+#   webhook:
+#     endpoint: http://diun-updater:5000/api/diun/webhook
+#     method: POST
+#     headers:
+#       Authorization: "Bearer ${DIUN_WEBHOOK_TOKEN}"
+#
+# (Use the diun-updater service/container name or its reachable host/IP in
+# place of `diun-updater` if Diun runs on a different Docker network.)

@@ -1,0 +1,72 @@
+/*
+ * Theme tokens.
+ *
+ * WP4 ships only the dark theme. WP5 adds the `[data-theme="light"]` block
+ * below (and the toggle UI in Header/Settings) — the dark block stays
+ * intact and self-contained.
+ */
+
+:root,
+[data-theme='dark'] {
+  /* Surfaces */
+  --color-bg: #0f1117;
+  --color-card: #161922;
+  --color-border: #232733;
+  --color-elevated: #1d212c;
+
+  /* Text */
+  --color-text: #e1e4ea;
+  --color-text-muted: #9ca3af;
+  --color-text-faint: #6b7280;
+
+  /* Accent / status */
+  --color-accent: #3b82f6;
+  --color-accent-contrast: #ffffff;
+  --color-success: #22c55e;
+  --color-error: #ef4444;
+  --color-pending: #f59e0b;
+
+  /* Derived */
+  --color-overlay: rgba(0, 0, 0, 0.6);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+
+  /* Layout */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --max-width: 800px;
+  --touch-target: 44px;
+}
+
+[data-theme='light'] {
+  /* Surfaces */
+  --color-bg: #f8f9fa;
+  --color-card: #ffffff;
+  --color-border: #dee2e6;
+
+  /* Text */
+  --color-text: #1a1b1e;
+  --color-text-muted: #495057;
+  --color-text-faint: #868e96;
+
+  /* Accent / status */
+  --color-accent: #3b82f6;
+  --color-accent-contrast: #ffffff;
+  --color-success: #16a34a;
+  --color-error: #dc2626;
+  --color-pending: #d97706;
+
+  /* Derived */
+  --color-overlay: rgba(0, 0, 0, 0.3);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.08);
+
+  /* Layout (unchanged — geometry doesn't vary by theme) */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --max-width: 800px;
+  --touch-target: 44px;
+
+  /* Elevated surface (e.g. expanded rows) — slightly darker than card */
+  --color-elevated: #f1f3f5;
+}
