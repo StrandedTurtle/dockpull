@@ -76,6 +76,12 @@ export function getContainers() {
   return get('/containers');
 }
 
+// Actively re-check registries for newer digests. Returns
+// { total, checked, updatesFound, errors }.
+export function checkNow() {
+  return post('/check');
+}
+
 export function startUpdate(name) {
   return post(`/update/${encodeURIComponent(name)}`);
 }

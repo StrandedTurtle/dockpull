@@ -188,4 +188,60 @@ function writeToSubscribers(session, evt) {
   }
 }
 
-export default { startSession, isActive, pushLog, finish, subscribe };
+// --- Global event channel -------------------------------------------------
+// A lightweight broadcast channel, separate from per-update sessions, used to
+// nudge connected dashboards to refresh when something changes server-side: a
+// new Diun webhook event, a manual "check now", or a finished update.
+const globalClients = new Set();
+
+export function subscribeGlobal(res, req) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
+  res.write(': connected\n\n');
+
+  globalClients.add(res);
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch {
+      // gone; close handler clears the interval
+    }
+  }, 15_000);
+
+  const cleanup = () => {
+    clearInterval(keepAlive);
+    globalClients.delete(res);
+  };
+  res.on('close', cleanup);
+  if (req) {
+    req.on('close', cleanup);
+  }
+}
+
+export function broadcastGlobal(evt) {
+  const payload = `data: ${JSON.stringify(evt)}\n\n`;
+  for (const res of globalClients) {
+    try {
+      res.write(payload);
+    } catch {
+      // subscriber gone; its close handler will clean it up
+    }
+  }
+}
+
+export default {
+  startSession,
+  isActive,
+  pushLog,
+  finish,
+  subscribe,
+  subscribeGlobal,
+  broadcastGlobal,
+};

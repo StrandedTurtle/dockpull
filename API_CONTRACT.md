@@ -56,6 +56,27 @@ All request/response bodies are JSON unless noted otherwise.
 - Auth: cookie.
 - Response: `200` — array of container items (shape below).
 
+### `POST /api/check`
+
+- Auth: cookie.
+- Body: none.
+- Actively queries the registry for each running image's current digest
+  (independent of Diun webhooks) and records/clears update events
+  accordingly.
+- Response:
+  - `200 { "total": n, "checked": n, "updatesFound": n, "errors": n }`
+  - `503 { "error": "docker_unavailable" }` if the Docker daemon is
+    unreachable.
+
+### `GET /api/events`
+
+- Auth: cookie.
+- Response: `text/event-stream` (SSE). Emits
+  `data: {"type":"containers-changed"}` whenever server state changes (a Diun
+  webhook arrived, a manual check ran, or an update finished) so dashboards
+  can refresh without a manual reload. Comment lines (`: ...`) are sent as
+  keepalives.
+
 ### `POST /api/update/:name`
 
 - Auth: cookie.

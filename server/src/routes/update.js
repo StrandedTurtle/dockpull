@@ -64,6 +64,9 @@ async function runUpdate(name, image) {
       message: err.message,
     });
     sse.finish(name, { success: false, message: err.message });
+  } finally {
+    // Let other connected dashboards refresh their list/badges.
+    sse.broadcastGlobal({ type: 'containers-changed' });
   }
 }
 

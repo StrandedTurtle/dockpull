@@ -11,6 +11,7 @@ import express from 'express';
 import { config } from './config.js';
 import { normalizeRef } from './reconcile.js';
 import { recordEvent } from './db.js';
+import { broadcastGlobal } from './sse.js';
 
 export const webhookRouter = express.Router();
 
@@ -70,6 +71,10 @@ webhookRouter.post('/api/diun/webhook', (req, res) => {
     digest,
     raw_json: JSON.stringify(req.body),
   });
+
+  // Nudge any connected dashboards to refresh so the badge appears without a
+  // manual reload.
+  broadcastGlobal({ type: 'containers-changed' });
 
   return res.status(204).end();
 });

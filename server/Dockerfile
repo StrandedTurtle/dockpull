@@ -3,14 +3,28 @@
 # (docker-compose.yml at the repo root is already configured this way.)
 
 # ---- Stage 1: build the client SPA ----
-FROM node:22-alpine AS client-builder
+# Pin to the build platform: the client output is static, arch-independent JS,
+# so there's no need to run the Vite build under emulation for each target
+# platform during a multi-arch build.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS client-builder
 WORKDIR /app/client
 COPY client/package*.json ./
 RUN npm ci
 COPY client/ ./
 RUN npm run build
 
-# ---- Stage 2: server runtime ----
+# ---- Stage 2: server dependencies ----
+# better-sqlite3 is a native module with no musl (Alpine) prebuilt binary, so
+# it must be compiled from source here — which needs a toolchain. Doing it in a
+# dedicated stage keeps python3/make/g++ out of the final image. This stage
+# runs on the TARGET platform, so the compiled binary matches the runtime arch.
+FROM node:22-alpine AS server-deps
+RUN apk add --no-cache python3 make g++
+WORKDIR /app
+COPY server/package*.json ./
+RUN npm ci --omit=dev
+
+# ---- Stage 3: server runtime ----
 FROM node:22-alpine
 
 # docker-cli + the v2 compose plugin so `docker compose ...` works.
@@ -20,9 +34,8 @@ RUN apk add --no-cache docker-cli docker-cli-compose
 
 WORKDIR /app
 
+COPY --from=server-deps /app/node_modules ./node_modules
 COPY server/package*.json ./
-RUN npm ci --omit=dev
-
 COPY server/src ./src
 COPY --from=client-builder /app/client/dist ./client/dist
 
