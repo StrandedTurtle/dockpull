@@ -11,11 +11,23 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import Docker from 'dockerode';
 import { config } from './config.js';
 import { normalizeRef } from './reconcile.js';
+
+// Best-effort identity of this app's own container, so listContainers can
+// exclude it (you can't safely update the updater from within itself). By
+// default Docker sets a container's hostname to its short id.
+const SELF_HOSTNAME = os.hostname();
+
+function isSelfContainer(name, id) {
+  if (config.SELF_CONTAINER_NAME && name === config.SELF_CONTAINER_NAME) return true;
+  if (SELF_HOSTNAME && id && id.startsWith(SELF_HOSTNAME)) return true;
+  return false;
+}
 
 // Constructing the client does not connect to the daemon — it just sets
 // up the socket path to dial on first request. Safe to do at import time.
@@ -237,6 +249,13 @@ export async function listContainers() {
       const inspectData = await container.inspect();
 
       const name = stripLeadingSlash(inspectData.Name);
+
+      // Never list our own container — offering to update it would recreate
+      // the container running this process mid-update.
+      if (isSelfContainer(name, summary.Id)) {
+        continue;
+      }
+
       const image = inspectData.Config?.Image;
       if (!image) {
         console.warn(`docker.js: container ${name} has no Config.Image, skipping`);

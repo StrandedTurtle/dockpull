@@ -19,6 +19,10 @@ export const config = {
   DIUN_WEBHOOK_TOKEN: process.env.DIUN_WEBHOOK_TOKEN || '',
   SESSION_TTL: envInt('SESSION_TTL', 604800),
   BASE_URL: process.env.BASE_URL || 'http://localhost:5000',
+  // Name of this app's own container, excluded from the dashboard so it
+  // can't try to update (and kill) itself. Defaults to the container_name
+  // used in the shipped docker-compose.yml; override if you rename it.
+  SELF_CONTAINER_NAME: process.env.SELF_CONTAINER_NAME || 'diun-updater',
 };
 
 /**

@@ -29,6 +29,8 @@ All request/response bodies are JSON unless noted otherwise.
 - Response:
   - `200 { "ok": true }` + `Set-Cookie: diun_session=...` on success.
   - `401 { "error": "invalid_password" }` on bad password.
+  - `429 { "error": "too_many_attempts" }` after too many failed attempts
+    from one client IP (temporary lockout).
 
 ### `POST /api/auth/logout`
 

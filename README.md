@@ -309,6 +309,7 @@ All configuration is via environment variables (see `.env.example`).
 | `DATA_DIR` | `/data` | | SQLite (`app.db`) location; persist via a volume. |
 | `SESSION_TTL` | `604800` | | Login cookie lifetime in seconds (7 days). |
 | `BASE_URL` | `http://localhost:5000` | | Public URL; if `https`, the cookie is set `Secure`. |
+| `SELF_CONTAINER_NAME` | `diun-updater` | | This app's own container name, excluded from the dashboard so it can't update itself. |
 
 The three required vars are enforced at startup — the server refuses to boot
 without them (a `SKIP_CONFIG_CHECK=1` escape hatch exists for skeleton
@@ -329,9 +330,13 @@ smoke-tests only; never use it in production).
   by `DIUN_WEBHOOK_TOKEN` (constant-time compared). Treat that token like a
   password and don't expose the app publicly without a proxy if you can avoid it.
 - **Auth** is a single password compared in constant time, issuing a signed,
-  `httpOnly`, `SameSite=Lax` cookie (`Secure` when `BASE_URL` is https). There's
-  intentionally no rate-limiting on login yet — keep the app off the open
-  internet or front it with Access/basic-auth if that matters to you.
+  `httpOnly`, `SameSite=Lax` cookie (`Secure` when `BASE_URL` is https). Failed
+  logins are rate-limited per client IP (lockout after repeated failures) to
+  blunt brute-force — but this is not a substitute for keeping the app off the
+  open internet or fronting it with Cloudflare Access if exposure matters.
+- **The app excludes its own container** from the dashboard (it can't safely
+  update itself). Update the updater the normal way:
+  `docker compose pull diun-updater && docker compose up -d diun-updater`.
 
 ---
 
