@@ -25,10 +25,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.img.outputs.name }}
+          flavor: latest=false
+          # Use explicit ref checks rather than {{is_default_branch}} — the
+          # repo's default branch isn't necessarily `main`, which would leave
+          # a push to main with zero tags (and buildx refuses to push then).
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=edge,enable={{is_default_branch}}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
       - uses: docker/setup-qemu-action@v3
