@@ -20,6 +20,7 @@ never automatically** (no watchtower-style surprise upgrades).
 - [How it works](#how-it-works)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Add to an existing Compose stack](#add-to-an-existing-compose-stack)
 - [Step-by-step setup](#step-by-step-setup)
   - [1. Get the code onto your server](#1-get-the-code-onto-your-server)
   - [2. Create your `.env`](#2-create-your-env)
@@ -98,6 +99,64 @@ docker compose up -d --build
 Then add the webhook notifier to Diun ([step 5](#5-point-diun-at-the-app-the-webhook)),
 put both services on the same Docker network ([step 6](#6-put-them-on-the-same-network)),
 and open `http://<host-ip>:5000`.
+
+---
+
+## Add to an existing Compose stack
+
+If you already manage stacks with Docker Compose (or Dockge), the quickest path
+is the **prebuilt image** — no cloning, no building. Drop this service into an
+existing compose file (e.g. the `management` stack alongside Diun) and fill in
+the three secrets:
+
+```yaml
+services:
+  diun-updater:
+    image: ghcr.io/strandedturtle/diupdater:edge
+    container_name: diun-updater
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - ADMIN_PASSWORD=change-me                 # your login password
+      - SESSION_SECRET=REPLACE_ME                # openssl rand -hex 32
+      - DIUN_WEBHOOK_TOKEN=REPLACE_ME            # openssl rand -hex 32
+      - STACKS_DIR=/home/youruser/docker/stacks  # absolute host path to your stacks
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # ⚠️ SAME absolute path on the host AND inside the container — otherwise
+      #    relative bind mounts in your other stacks break on recreate.
+      - /home/youruser/docker/stacks:/home/youruser/docker/stacks
+      - diun-updater-data:/data
+
+volumes:
+  diun-updater-data:
+```
+
+Generate the two secrets (`openssl rand -hex 32` each), then start just this
+service:
+
+```bash
+docker compose up -d diun-updater
+```
+
+Finish by adding the Diun webhook notifier ([step 5](#5-point-diun-at-the-app-the-webhook)),
+making sure Diun and `diun-updater` share a Docker network ([step 6](#6-put-them-on-the-same-network)),
+then open `http://<host-ip>:5000`.
+
+**Image tags:** `:edge` tracks the latest commit on `main`; cutting a release
+tag (`git tag v0.1.0 && git push origin v0.1.0`) also publishes `:latest` and
+semver tags (`:0.1.0`, `:0.1`). Pin to a version for stability.
+
+> **Can't pull the image?** The GHCR package inherits the repo's visibility. To
+> let other hosts/people pull it without auth, make the package public: GitHub →
+> your avatar → **Packages** → `diupdater` → **Package settings** → **Change
+> visibility** → *Public*. Otherwise run `docker login ghcr.io` (with a PAT that
+> has `read:packages`) on each host first.
+
+The [same-path mount](#3-configure-the-compose-file) and
+[Docker-socket](#security-notes-read-this) warnings apply here too. Prefer to
+build from source? Use [Step-by-step setup](#step-by-step-setup) below instead.
 
 ---
 
