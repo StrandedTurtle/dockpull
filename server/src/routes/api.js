@@ -23,11 +23,11 @@ export const apiRouter = express.Router();
  * @param {number} fallback
  * @returns {number}
  */
-function toSafeInt(raw, fallback) {
+function toSafeInt(raw, fallback, max = Infinity) {
   if (raw === undefined) return fallback;
   const parsed = parseInt(raw, 10);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return parsed;
+  return Math.min(parsed, max);
 }
 
 apiRouter.get('/api/containers', async (req, res) => {
@@ -53,14 +53,14 @@ apiRouter.get('/api/containers', async (req, res) => {
 });
 
 apiRouter.get('/api/history', (req, res) => {
-  const limit = toSafeInt(req.query.limit, 50);
+  const limit = toSafeInt(req.query.limit, 50, 500);
   const offset = toSafeInt(req.query.offset, 0);
   const rows = db.getHistory({ containerName: req.query.container, limit, offset });
   return res.status(200).json(rows);
 });
 
 apiRouter.get('/api/history/:name', (req, res) => {
-  const limit = toSafeInt(req.query.limit, 50);
+  const limit = toSafeInt(req.query.limit, 50, 500);
   const offset = toSafeInt(req.query.offset, 0);
   const rows = db.getHistory({ containerName: req.params.name, limit, offset });
   return res.status(200).json(rows);

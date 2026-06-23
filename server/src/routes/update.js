@@ -15,6 +15,7 @@
 
 import express from 'express';
 import { docker, updateContainer } from '../docker.js';
+import { normalizeRef } from '../reconcile.js';
 import * as sse from '../sse.js';
 import * as db from '../db.js';
 
@@ -39,6 +40,19 @@ async function runUpdate(name, image) {
       status: result.success ? 'success' : 'failure',
       message: result.message,
     });
+    // On success, clear any pending Diun event for this image so the
+    // dashboard indicator goes away — we just pulled the latest. Relying on
+    // the digest-equality check in /api/containers alone is not enough:
+    // Diun often reports a manifest-list (multi-arch) digest while the
+    // container's RepoDigest is platform-specific, so they'd never match and
+    // the badge would stick forever.
+    if (result.success && image) {
+      try {
+        db.resolveEventsForRef(normalizeRef(image));
+      } catch {
+        // normalizeRef shouldn't throw for a real image ref; non-fatal.
+      }
+    }
     sse.finish(name, { success: result.success, message: result.message });
   } catch (err) {
     db.recordUpdate({
