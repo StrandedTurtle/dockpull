@@ -22,10 +22,25 @@ export function useUpdateRunner(name, onSettled) {
   const { lines, result, error: sseError, reset } = useSSE(name, streamActive);
 
   const resolveRef = useRef(null);
+  // Ensures we settle (resolve the run promise + notify the dashboard) exactly
+  // once per run, so a connection error arriving after the result can't
+  // overwrite a success or trigger a second re-fetch.
+  const settledRef = useRef(false);
+
+  const settle = useCallback(() => {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    onSettled(name);
+    if (resolveRef.current) {
+      resolveRef.current();
+      resolveRef.current = null;
+    }
+  }, [name, onSettled]);
 
   const run = useCallback(() => {
     return new Promise((resolve) => {
       resolveRef.current = resolve;
+      settledRef.current = false;
       setStartError('');
       setStatus({ type: '', message: '' });
       reset();
@@ -37,15 +52,11 @@ export function useUpdateRunner(name, onSettled) {
         })
         .catch((err) => {
           setStartError(err.message || 'Failed to start update');
-          if (resolveRef.current) {
-            resolveRef.current();
-            resolveRef.current = null;
-          }
-          onSettled(name);
+          settle();
         })
         .finally(() => setStarting(false));
     });
-  }, [name, reset, onSettled]);
+  }, [name, reset, settle]);
 
   useEffect(() => {
     if (!result) return;
@@ -54,22 +65,18 @@ export function useUpdateRunner(name, onSettled) {
       type: result.success ? 'success' : 'error',
       message: result.message || (result.success ? 'Updated successfully' : 'Update failed'),
     });
-    onSettled(name);
-    if (resolveRef.current) {
-      resolveRef.current();
-      resolveRef.current = null;
-    }
-  }, [result, name, onSettled]);
+    settle();
+  }, [result, settle]);
 
   useEffect(() => {
     if (!sseError) return;
+    // If the result already arrived, a subsequent stream error (e.g. the
+    // server closing the connection) is expected — don't clobber the result.
+    if (result || settledRef.current) return;
+    setStreamActive(false);
     setStatus({ type: 'error', message: sseError });
-    onSettled(name);
-    if (resolveRef.current) {
-      resolveRef.current();
-      resolveRef.current = null;
-    }
-  }, [sseError, name, onSettled]);
+    settle();
+  }, [sseError, result, settle]);
 
   const busy = starting || streamActive;
 

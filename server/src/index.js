@@ -5,7 +5,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import { config, assertRequiredConfig } from './config.js';
 // Importing db creates the data dir + tables as a side effect on load.
-import './db.js';
+import db from './db.js';
 import { webhookRouter } from './webhook.js';
 import { authRouter, requireAuth } from './auth.js';
 import { apiRouter } from './routes/api.js';
@@ -25,6 +25,7 @@ if (process.env.SKIP_CONFIG_CHECK !== '1') {
 }
 
 const app = express();
+app.disable('x-powered-by');
 
 app.use(express.json());
 app.use(cookieParser(config.SESSION_SECRET));
@@ -66,6 +67,27 @@ if (clientDistExists) {
   console.warn(`No client build found at ${clientDistDir} — skipping static file serving.`);
 }
 
-app.listen(config.PORT, () => {
+const server = app.listen(config.PORT, () => {
   console.log(`Diun Updater server listening at ${config.BASE_URL} (port ${config.PORT})`);
 });
+
+// Graceful shutdown: stop accepting connections and checkpoint/close SQLite
+// so a `docker stop` doesn't leave the WAL or an in-flight write half-done.
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal}, shutting down…`);
+  server.close(() => {
+    try {
+      db.close();
+    } catch {
+      // already closed / nothing to do
+    }
+    process.exit(0);
+  });
+  // Don't hang forever if a connection (e.g. an open SSE stream) won't close.
+  setTimeout(() => process.exit(0), 5000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

@@ -106,7 +106,7 @@ export default function Dashboard({ onPendingCountChange }) {
 
       {!loading && !error && containers.length === 0 && (
         <div className="empty-state">
-          <p>All up to date.</p>
+          <p>No containers found.</p>
         </div>
       )}
 

@@ -16,6 +16,39 @@ export const authRouter = express.Router();
 
 const SESSION_COOKIE = 'diun_session';
 
+// --- Simple in-memory login rate limiting ---------------------------------
+// Per-client-IP failed-attempt tracking with a lockout, to blunt brute-force
+// of the single shared password. Not a substitute for keeping the app off the
+// open internet, but a sane default for a tool that may be exposed. State is
+// in-memory (resets on restart), which is fine for a single-instance app.
+const MAX_FAILURES = 10; // failures allowed within the window before lockout
+const FAILURE_WINDOW_MS = 15 * 60 * 1000; // rolling window for counting failures
+const LOCKOUT_MS = 15 * 60 * 1000; // how long a lockout lasts once tripped
+
+const loginAttempts = new Map(); // ip -> { count, firstAt, lockedUntil }
+
+export function isLockedOut(ip, now = Date.now()) {
+  const a = loginAttempts.get(ip);
+  return Boolean(a && a.lockedUntil && a.lockedUntil > now);
+}
+
+export function recordLoginFailure(ip, now = Date.now()) {
+  let a = loginAttempts.get(ip);
+  if (!a || now - a.firstAt > FAILURE_WINDOW_MS) {
+    a = { count: 0, firstAt: now, lockedUntil: 0 };
+  }
+  a.count += 1;
+  if (a.count >= MAX_FAILURES) {
+    a.lockedUntil = now + LOCKOUT_MS;
+  }
+  loginAttempts.set(ip, a);
+  return a;
+}
+
+export function clearLoginFailures(ip) {
+  loginAttempts.delete(ip);
+}
+
 /**
  * Constant-time comparison of the supplied password against
  * `config.ADMIN_PASSWORD`. Guards against length mismatches
@@ -62,12 +95,20 @@ export function isValidSession(req) {
  * success.
  */
 export function loginHandler(req, res) {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+
+  if (isLockedOut(ip)) {
+    return res.status(429).json({ error: 'too_many_attempts' });
+  }
+
   const password = req.body?.password;
 
   if (!isValidPassword(password)) {
+    recordLoginFailure(ip);
     return res.status(401).json({ error: 'invalid_password' });
   }
 
+  clearLoginFailures(ip);
   const expiry = String(Date.now() + config.SESSION_TTL * 1000);
   res.cookie(SESSION_COOKIE, expiry, {
     signed: true,

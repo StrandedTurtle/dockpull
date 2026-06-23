@@ -89,6 +89,7 @@ export function finish(name, result) {
   writeToSubscribers(session, evt);
   for (const res of session.subscribers) {
     try {
+      clearInterval(res.__sseKeepAlive);
       res.end();
     } catch {
       // ignore — subscriber may already be gone
@@ -117,6 +118,9 @@ export function subscribe(name, res, req) {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
+    // Tell nginx (and similar) not to buffer the stream, or log lines would
+    // be held back until the response closed.
+    'X-Accel-Buffering': 'no',
   });
   if (typeof res.flushHeaders === 'function') {
     res.flushHeaders();
@@ -147,7 +151,20 @@ export function subscribe(name, res, req) {
 
   session.subscribers.add(res);
 
+  // Heartbeat so reverse proxies don't drop an idle connection during a long
+  // pull with sparse output. SSE comment lines (": ...") are ignored by the
+  // EventSource client, so they don't show up as log lines.
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(': keepalive\n\n');
+    } catch {
+      // subscriber is gone; the close handler will clear this interval
+    }
+  }, 15_000);
+  res.__sseKeepAlive = keepAlive;
+
   const cleanup = () => {
+    clearInterval(keepAlive);
     session.subscribers.delete(res);
   };
   res.on('close', cleanup);
