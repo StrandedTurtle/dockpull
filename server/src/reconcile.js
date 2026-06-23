@@ -1,5 +1,5 @@
 /**
- * Pure reconciliation helpers: normalizing Docker image references and
+ * Pure reconciliation helpers: parsing/normalizing Docker image references and
  * comparing digests. No DB access, no dockerode — kept dependency-free so
  * it is trivially unit-testable (see server/test/reconcile.test.js).
  */
@@ -18,49 +18,44 @@ function looksLikeRegistryHost(segment) {
 }
 
 /**
- * Normalize a Docker image reference to a canonical `registry/repo:tag`
- * string (or `registry/repo` if the ref was digest-pinned with no tag).
+ * Parse a Docker image reference into its components.
  *
  * Rules:
  * - Default registry is `docker.io`; Docker Hub official images (no slash,
  *   or no registry-looking first segment) get the `library/` namespace.
  * - Default tag is `latest` when no tag is present.
  * - A colon that is part of a registry's port (e.g. `registry:5000/foo`) is
- *   never mistaken for a tag separator — only a colon appearing after the
- *   last `/` (i.e. in the final path segment) can introduce a tag.
- * - Any `@sha256:...` digest suffix is stripped. If the ref had a digest
- *   and no tag, the result has no tag at all (`registry/repo`, no trailing
- *   `:tag`). This means digest-pinned refs won't match tag-keyed Diun
- *   events — that's an accepted limitation, not a bug.
- * - The registry + repo path is lowercased (Docker image names are
- *   lowercase by spec); the tag is left as-is since tags are
- *   case-sensitive.
+ *   never mistaken for a tag separator — only a colon in the final path
+ *   segment can introduce a tag.
+ * - An `@sha256:...` digest suffix is captured separately. If the ref had a
+ *   digest, `tag` is null (digest-pinned refs have no meaningful tag to
+ *   check against tag-keyed events).
+ * - The registry + repository are lowercased; the tag is left as-is.
  *
  * @param {string} imageRef
- * @returns {string}
+ * @returns {{ registry: string, repository: string, tag: string|null, digest: string|null }}
  */
-export function normalizeRef(imageRef) {
+export function parseRef(imageRef) {
   if (typeof imageRef !== 'string') {
-    throw new TypeError('normalizeRef: imageRef must be a string');
+    throw new TypeError('parseRef: imageRef must be a string');
   }
 
   let ref = imageRef.trim();
   if (ref === '') {
-    throw new TypeError('normalizeRef: imageRef must not be empty');
+    throw new TypeError('parseRef: imageRef must not be empty');
   }
 
   // 1. Strip a trailing @sha256:... digest, if present.
-  let hasDigest = false;
+  let digest = null;
   const digestMatch = ref.match(/@sha256:[0-9a-fA-F]+$/);
   if (digestMatch) {
-    hasDigest = true;
+    digest = digestMatch[0].slice(1); // drop the leading '@' -> "sha256:..."
     ref = ref.slice(0, ref.length - digestMatch[0].length);
   }
 
-  // 2. Split into registry+repo (the "name") and an optional tag.
-  //    A tag is only present if there's a colon in the LAST path segment
-  //    (the part after the final '/'), so registry:port is not confused
-  //    with name:tag.
+  // 2. Split into registry+repo ("name") and an optional tag. A tag is only
+  //    present if there's a colon in the LAST path segment, so registry:port
+  //    is not confused with name:tag.
   const lastSlash = ref.lastIndexOf('/');
   const lastSegment = lastSlash === -1 ? ref : ref.slice(lastSlash + 1);
   const colonInLastSegment = lastSegment.lastIndexOf(':');
@@ -75,9 +70,8 @@ export function normalizeRef(imageRef) {
     name = ref;
   }
 
-  if (hasDigest) {
-    // Digest-pinned: no tag, regardless of whether one was parsed above
-    // (a ref can't legally have both, but be defensive).
+  if (digest) {
+    // Digest-pinned: no tag, regardless of whether one was parsed above.
     tag = null;
   } else if (tag === null || tag === '') {
     tag = DEFAULT_TAG;
@@ -97,17 +91,31 @@ export function normalizeRef(imageRef) {
     registry = parts[0];
     repoParts = parts.slice(1);
   } else {
-    // e.g. "library/nginx" or "lscr.io"-less two-segment Hub images like
+    // e.g. "library/nginx" or two-segment Hub images like
     // "linuxserver/sonarr" -> docker.io/linuxserver/sonarr
     registry = DEFAULT_REGISTRY;
     repoParts = parts;
   }
 
-  const repo = repoParts.join('/');
-  const registryLower = registry.toLowerCase();
-  const repoLower = repo.toLowerCase();
+  return {
+    registry: registry.toLowerCase(),
+    repository: repoParts.join('/').toLowerCase(),
+    tag,
+    digest,
+  };
+}
 
-  const base = `${registryLower}/${repoLower}`;
+/**
+ * Normalize a Docker image reference to a canonical `registry/repo:tag`
+ * string (or `registry/repo` if the ref was digest-pinned with no tag).
+ * Used as the matching key between Diun events and running containers.
+ *
+ * @param {string} imageRef
+ * @returns {string}
+ */
+export function normalizeRef(imageRef) {
+  const { registry, repository, tag } = parseRef(imageRef);
+  const base = `${registry}/${repository}`;
   return tag === null ? base : `${base}:${tag}`;
 }
 

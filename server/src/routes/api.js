@@ -11,6 +11,8 @@ import express from 'express';
 import { listContainers } from '../docker.js';
 import { buildContainerItems } from '../containers-service.js';
 import { normalizeRef } from '../reconcile.js';
+import { runCheck } from '../checker.js';
+import { subscribeGlobal, broadcastGlobal } from '../sse.js';
 import * as db from '../db.js';
 
 export const apiRouter = express.Router();
@@ -50,6 +52,26 @@ apiRouter.get('/api/containers', async (req, res) => {
   }
 
   return res.status(200).json(items);
+});
+
+// Actively check registries for newer digests (independent of Diun webhooks).
+apiRouter.post('/api/check', async (req, res) => {
+  let result;
+  try {
+    result = await runCheck();
+  } catch (err) {
+    console.error(`api.js: POST /api/check failed: ${err.message}`);
+    return res.status(503).json({ error: 'docker_unavailable', message: err.message });
+  }
+  broadcastGlobal({ type: 'containers-changed' });
+  return res.status(200).json(result);
+});
+
+// Global SSE channel: emits {"type":"containers-changed"} when server state
+// changes (webhook event, manual check, finished update) so dashboards can
+// refresh without a manual reload.
+apiRouter.get('/api/events', (req, res) => {
+  subscribeGlobal(res, req);
 });
 
 apiRouter.get('/api/history', (req, res) => {

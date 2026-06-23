@@ -205,6 +205,19 @@ The SQLite database is created automatically in the `diun-updater-data` volume
 on first start. The first time you load the UI you'll get the login screen —
 enter `ADMIN_PASSWORD`.
 
+> **Prefer a prebuilt image?** Tagged releases publish a multi-arch image
+> (`linux/amd64` + `linux/arm64`) to GHCR. Instead of `build:`, point the
+> compose service at it and skip the build:
+>
+> ```yaml
+> services:
+>   diun-updater:
+>     image: ghcr.io/strandedturtle/diupdater:latest
+>     # ...keep the same environment + volumes as above...
+> ```
+>
+> Then `docker compose up -d` (no `--build`).
+
 ### 5. Point Diun at the app (the webhook)
 
 Add a `webhook` notifier to your Diun config (this is **in addition to** your
@@ -273,7 +286,12 @@ Open `http://<host>:5000` (or your tunnel URL) and log in with `ADMIN_PASSWORD`.
   badge clears.
 - **Update all** runs every eligible container one at a time (a failure on one
   doesn't stop the rest).
+- **Check** actively queries the registries for newer digests right now, instead
+  of waiting for Diun (see [Active update checks](#active-update-checks)).
 - **Refresh** re-reads live state from Docker.
+- The dashboard also **updates itself live** — when a Diun webhook arrives, a
+  check runs, or an update finishes, the list refreshes automatically (no need to
+  hit Refresh).
 - The **pin** icon hides a container's update badge (useful to "ignore this one
   for now"). Pinned items can still be updated manually; manage/unpin them from
   Settings.
@@ -291,6 +309,20 @@ pages through older entries.
 **Install as a mobile app (PWA).** In your phone's browser, use "Add to Home
 Screen". It installs as a standalone, full-screen app with an icon — this is the
 mobile experience that replaces fiddling with Dockge.
+
+### Active update checks
+
+The **Check** button (and `POST /api/check`) makes the app query the registries
+directly for each running image's current digest and flag anything out of date —
+independent of Diun. This is useful for a first run (Diun only sends a webhook
+*when a digest changes*, so a fresh install is otherwise quiet), to recover from
+a webhook that was missed while the app was down, or if you'd rather not depend
+on Diun at all.
+
+It currently supports registries reachable **anonymously** over the standard
+token flow — Docker Hub, GHCR, lscr.io, quay.io, etc. for public images. Private
+images that require credentials are skipped (counted under `errors`) and still
+rely on Diun's webhook for their signal.
 
 ---
 

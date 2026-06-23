@@ -928,3 +928,11 @@ a {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- Check result message ---------- */
+
+.check-msg {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
