@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { get, getPinned, unpin } from '../api.js';
+import {
+  get,
+  getPinned,
+  unpin,
+  getHidden,
+  unhideContainer,
+  getSettings,
+  updateSettings,
+} from '../api.js';
 import { useTheme } from '../hooks/useTheme.js';
 
 export default function SettingsPage() {
@@ -10,6 +18,14 @@ export default function SettingsPage() {
   const [pinnedError, setPinnedError] = useState('');
   const [unpinningRef, setUnpinningRef] = useState('');
 
+  const [hidden, setHidden] = useState([]);
+  const [hiddenLoading, setHiddenLoading] = useState(true);
+  const [hiddenError, setHiddenError] = useState('');
+  const [unhidingName, setUnhidingName] = useState('');
+
+  const [settings, setSettings] = useState(null);
+  const [settingsError, setSettingsError] = useState('');
+
   const [health, setHealth] = useState(null); // null = unknown, true/false once checked
 
   const loadPinned = useCallback(async () => {
@@ -18,7 +34,17 @@ export default function SettingsPage() {
       const data = await getPinned();
       setPinned(Array.isArray(data) ? data : []);
     } catch (err) {
-      setPinnedError(err.message || 'Failed to load pinned images');
+      setPinnedError(err.message || 'Failed to load pinned versions');
+    }
+  }, []);
+
+  const loadHidden = useCallback(async () => {
+    setHiddenError('');
+    try {
+      const data = await getHidden();
+      setHidden(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setHiddenError(err.message || 'Failed to load hidden containers');
     }
   }, []);
 
@@ -28,10 +54,36 @@ export default function SettingsPage() {
   }, [loadPinned]);
 
   useEffect(() => {
+    setHiddenLoading(true);
+    loadHidden().finally(() => setHiddenLoading(false));
+  }, [loadHidden]);
+
+  useEffect(() => {
+    getSettings()
+      .then((s) => setSettings(s))
+      .catch((err) => setSettingsError(err.message || 'Failed to load settings'));
+  }, []);
+
+  useEffect(() => {
     get('/health')
       .then((data) => setHealth(!!(data && data.ok)))
       .catch(() => setHealth(false));
   }, []);
+
+  const saveSetting = useCallback(
+    async (patch) => {
+      // optimistic
+      setSettings((prev) => ({ ...prev, ...patch }));
+      setSettingsError('');
+      try {
+        const updated = await updateSettings(patch);
+        setSettings(updated);
+      } catch (err) {
+        setSettingsError(err.message || 'Failed to save settings');
+      }
+    },
+    []
+  );
 
   const handleUnpin = useCallback(
     async (ref) => {
@@ -41,12 +93,28 @@ export default function SettingsPage() {
         await unpin(ref);
         await loadPinned();
       } catch (err) {
-        setPinnedError(err.message || 'Failed to unpin image');
+        setPinnedError(err.message || 'Failed to unpin version');
       } finally {
         setUnpinningRef('');
       }
     },
     [loadPinned]
+  );
+
+  const handleUnhide = useCallback(
+    async (name) => {
+      setUnhidingName(name);
+      setHiddenError('');
+      try {
+        await unhideContainer(name);
+        await loadHidden();
+      } catch (err) {
+        setHiddenError(err.message || 'Failed to unhide container');
+      } finally {
+        setUnhidingName('');
+      }
+    },
+    [loadHidden]
   );
 
   return (
@@ -74,6 +142,57 @@ export default function SettingsPage() {
               <span className="theme-switch-thumb" />
             </span>
             <span className="theme-switch-text">{theme === 'dark' ? 'Dark' : 'Light'}</span>
+          </button>
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <h3>Behaviour</h3>
+        {settingsError && <p className="settings-error">{settingsError}</p>}
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Default view</span>
+            <span className="settings-row-desc">Which containers the dashboard shows first.</span>
+          </div>
+          <div className="filter-row">
+            <button
+              type="button"
+              className={`chip${settings?.defaultFilter !== 'all' ? ' is-active' : ''}`}
+              onClick={() => saveSetting({ defaultFilter: 'updates' })}
+              disabled={!settings}
+            >
+              Updates only
+            </button>
+            <button
+              type="button"
+              className={`chip${settings?.defaultFilter === 'all' ? ' is-active' : ''}`}
+              onClick={() => saveSetting({ defaultFilter: 'all' })}
+              disabled={!settings}
+            >
+              All
+            </button>
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Check on open</span>
+            <span className="settings-row-desc">
+              Automatically check for updates when you open the app.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="theme-switch"
+            role="switch"
+            aria-checked={!!settings?.autoCheckOnOpen}
+            aria-label="Toggle check on open"
+            onClick={() => saveSetting({ autoCheckOnOpen: !settings?.autoCheckOnOpen })}
+            disabled={!settings}
+          >
+            <span className="theme-switch-track">
+              <span className="theme-switch-thumb" />
+            </span>
+            <span className="theme-switch-text">{settings?.autoCheckOnOpen ? 'On' : 'Off'}</span>
           </button>
         </div>
       </section>
@@ -117,6 +236,51 @@ export default function SettingsPage() {
                 >
                   {unpinningRef === ref && <span className="spinner" aria-hidden="true" />}
                   Unpin
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="settings-section">
+        <h3>Hidden containers</h3>
+        {hiddenLoading && (
+          <div className="dashboard-list" aria-busy="true" aria-label="Loading hidden containers">
+            <div className="skeleton-card" style={{ height: 52 }} />
+          </div>
+        )}
+
+        {!hiddenLoading && hiddenError && (
+          <div className="error-state">
+            <p>{hiddenError}</p>
+            <button type="button" className="btn btn-primary" onClick={loadHidden}>
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!hiddenLoading && !hiddenError && hidden.length === 0 && (
+          <div className="empty-state">
+            <p>No hidden containers.</p>
+          </div>
+        )}
+
+        {!hiddenLoading && !hiddenError && hidden.length > 0 && (
+          <ul className="pinned-list">
+            {hidden.map((name) => (
+              <li key={name} className="pinned-row">
+                <span className="pinned-ref truncate" title={name}>
+                  {name}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => handleUnhide(name)}
+                  disabled={unhidingName === name}
+                >
+                  {unhidingName === name && <span className="spinner" aria-hidden="true" />}
+                  Unhide
                 </button>
               </li>
             ))}

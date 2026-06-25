@@ -8,10 +8,12 @@ function makeContainer(overrides = {}) {
     image: 'nginx:latest',
     tag: 'latest',
     currentVersion: null,
+    sourceUrl: null,
     currentDigest: 'sha256:aaa',
     project: 'web',
     service: 'nginx',
     composeFile: '/stacks/web/docker-compose.yml',
+    composeFileMissing: false,
     workingDir: '/stacks/web',
     state: 'running',
     normalizedRef: 'docker.io/library/nginx:latest',
@@ -82,14 +84,28 @@ describe('buildContainerItems', () => {
       image: 'nginx:latest',
       tag: 'latest',
       currentVersion: null,
+      sourceUrl: null,
       currentDigest: 'sha256:aaa',
       updateAvailable: false,
       availableDigest: null,
       pinned: false,
+      hidden: false,
       state: 'running',
       composeFile: '/stacks/web/docker-compose.yml',
+      composeFileMissing: false,
       workingDir: '/stacks/web',
     });
+  });
+
+  test('isHidden marks the item hidden', () => {
+    const containers = [makeContainer()];
+    const { items } = buildContainerItems({
+      containers,
+      lookupEvent: () => undefined,
+      isPinned: () => false,
+      isHidden: (name) => name === 'nginx',
+    });
+    assert.equal(items[0].hidden, true);
   });
 
   test('handles multiple containers independently', () => {

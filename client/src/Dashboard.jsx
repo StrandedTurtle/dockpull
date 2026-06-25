@@ -1,11 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getContainers, checkNow, getDiagnostics } from './api.js';
+import { getContainers, checkNow, getSettings, updateSettings } from './api.js';
 import UpdateCard from './components/UpdateCard.jsx';
 import UpdateAllButton from './components/UpdateAllButton.jsx';
 import StackGroup from './components/StackGroup.jsx';
 
-const FILTER_KEY = 'diun.filter';
-const AUTOCHECK_KEY = 'diun.autoCheckOnOpen';
 const AUTOCHECK_SESSION = 'diun.autochecked';
 const UNGROUPED = 'Ungrouped';
 
@@ -21,20 +19,25 @@ function byUpdateThenName(a, b) {
   return a.name.localeCompare(b.name);
 }
 
+// Suggested same-path mount derived from a broken compose file path: the
+// directory above the per-stack folder (e.g. /opt/stacks/web/compose.yaml ->
+// /opt/stacks).
+function stacksRootOf(composeFile) {
+  if (!composeFile) return null;
+  const parts = composeFile.split('/');
+  parts.pop(); // file name
+  parts.pop(); // stack folder
+  const root = parts.join('/');
+  return root || '/';
+}
+
 export default function Dashboard({ onPendingCountChange }) {
   const [containers, setContainers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState('');
-  const [stacksWarning, setStacksWarning] = useState(null); // {stacksDir} when not mounted
-  const [filter, setFilter] = useState(() => {
-    try {
-      return localStorage.getItem(FILTER_KEY) || 'updates';
-    } catch {
-      return 'updates';
-    }
-  });
+  const [filter, setFilter] = useState('updates');
 
   // name -> run() function, populated by each UpdateCard so "Update all"
   // can drive the same start+SSE flow the per-card button uses.
@@ -72,28 +75,28 @@ export default function Dashboard({ onPendingCountChange }) {
     }
   }, [load]);
 
-  // Initial load + auto-check on first open this session.
+  // Initial load + settings + auto-check on first open this session.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      await load();
+      const [settingsResult] = await Promise.allSettled([getSettings(), load()]);
       if (cancelled) return;
       setLoading(false);
 
-      let autoCheck = true;
-      try {
-        autoCheck = localStorage.getItem(AUTOCHECK_KEY) !== '0';
-      } catch {
-        autoCheck = true;
-      }
+      const settings =
+        settingsResult.status === 'fulfilled' && settingsResult.value
+          ? settingsResult.value
+          : { defaultFilter: 'updates', autoCheckOnOpen: true };
+      setFilter(settings.defaultFilter === 'all' ? 'all' : 'updates');
+
       let alreadyChecked = false;
       try {
         alreadyChecked = sessionStorage.getItem(AUTOCHECK_SESSION) === '1';
       } catch {
         alreadyChecked = false;
       }
-      if (autoCheck && !alreadyChecked) {
+      if (settings.autoCheckOnOpen !== false && !alreadyChecked) {
         try {
           sessionStorage.setItem(AUTOCHECK_SESSION, '1');
         } catch {
@@ -106,20 +109,6 @@ export default function Dashboard({ onPendingCountChange }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Surface a mount-misconfig warning so the user can fix it before an update
-  // fails with a cryptic "compose file not found".
-  useEffect(() => {
-    getDiagnostics()
-      .then((d) => {
-        if (d?.stacks && d.stacks.mounted === false) {
-          setStacksWarning({ stacksDir: d.stacks.stacksDir });
-        } else {
-          setStacksWarning(null);
-        }
-      })
-      .catch(() => setStacksWarning(null));
   }, []);
 
   // Live updates: refresh automatically when the server signals a change.
@@ -169,37 +158,39 @@ export default function Dashboard({ onPendingCountChange }) {
 
   const setFilterPersisted = useCallback((value) => {
     setFilter(value);
-    try {
-      localStorage.setItem(FILTER_KEY, value);
-    } catch {
-      // ignore
-    }
+    updateSettings({ defaultFilter: value }).catch(() => {
+      // non-fatal: the view still changes even if persisting the default fails
+    });
   }, []);
 
-  const pendingTargets = useMemo(() => containers.filter(hasUpdate).map((c) => c.name), [containers]);
+  // Visible = not hidden. Pinned go to their own bottom section.
+  const visible = useMemo(() => containers.filter((c) => !c.hidden), [containers]);
+  const pinnedItems = useMemo(
+    () => visible.filter((c) => c.pinned).sort((a, b) => a.name.localeCompare(b.name)),
+    [visible]
+  );
+  const mainItems = useMemo(() => visible.filter((c) => !c.pinned), [visible]);
+
+  const pendingTargets = useMemo(() => mainItems.filter(hasUpdate).map((c) => c.name), [mainItems]);
 
   useEffect(() => {
     if (onPendingCountChange) onPendingCountChange(pendingTargets.length);
   }, [pendingTargets, onPendingCountChange]);
 
-  // Apply the filter, then group by stack (compose project), then order groups
-  // so those with updates come first.
+  // Apply the filter, then group by stack (compose project); groups with
+  // updates come first.
   const groups = useMemo(() => {
-    const visible = filter === 'updates' ? containers.filter(hasUpdate) : containers;
+    const items = filter === 'updates' ? mainItems.filter(hasUpdate) : mainItems;
     const byProject = new Map();
-    for (const c of visible) {
+    for (const c of items) {
       const key = c.project || UNGROUPED;
       if (!byProject.has(key)) byProject.set(key, []);
       byProject.get(key).push(c);
     }
     const out = [];
-    for (const [project, items] of byProject) {
-      items.sort(byUpdateThenName);
-      out.push({
-        project,
-        items,
-        updateCount: items.filter(hasUpdate).length,
-      });
+    for (const [project, groupItems] of byProject) {
+      groupItems.sort(byUpdateThenName);
+      out.push({ project, items: groupItems, updateCount: groupItems.filter(hasUpdate).length });
     }
     out.sort((a, b) => {
       const au = a.updateCount > 0 ? 0 : 1;
@@ -210,9 +201,16 @@ export default function Dashboard({ onPendingCountChange }) {
       return a.project.localeCompare(b.project);
     });
     return out;
-  }, [containers, filter]);
+  }, [mainItems, filter]);
 
-  const totalVisible = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups]);
+  const mainCount = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups]);
+
+  // Mount/diagnostic banner: any compose file unreachable inside the container.
+  const mountIssue = useMemo(() => {
+    const broken = containers.find((c) => c.composeFileMissing && c.composeFile);
+    if (!broken) return null;
+    return { example: broken.composeFile, root: stacksRootOf(broken.composeFile) };
+  }, [containers]);
 
   return (
     <div className="dashboard">
@@ -259,12 +257,17 @@ export default function Dashboard({ onPendingCountChange }) {
 
       {checkMsg && <p className="check-msg">{checkMsg}</p>}
 
-      {stacksWarning && (
+      {mountIssue && (
         <div className="banner banner-warn" role="alert">
-          <strong>Stacks directory not mounted.</strong> The path{' '}
-          <code>{stacksWarning.stacksDir}</code> isn't present inside this container, so
-          compose-based updates will fail. Mount your stacks dir at the same absolute path on
-          the host and in the container (e.g. <code>{stacksWarning.stacksDir}:{stacksWarning.stacksDir}</code>)
+          <strong>Some stacks aren't mounted.</strong> The compose file{' '}
+          <code>{mountIssue.example}</code> isn't reachable inside this container, so those
+          updates will fail. Mount your stacks directory at the same absolute path on the host
+          and in the container
+          {mountIssue.root ? (
+            <>
+              {' '}(e.g. <code>{mountIssue.root}:{mountIssue.root}</code>)
+            </>
+          ) : null}{' '}
           and set <code>STACKS_DIR</code> to match. See the README.
         </div>
       )}
@@ -286,22 +289,24 @@ export default function Dashboard({ onPendingCountChange }) {
         </div>
       )}
 
-      {!loading && !error && containers.length === 0 && (
+      {!loading && !error && visible.length === 0 && (
         <div className="empty-state">
           <p>No containers found.</p>
         </div>
       )}
 
-      {!loading && !error && containers.length > 0 && totalVisible === 0 && (
+      {!loading && !error && visible.length > 0 && mainCount === 0 && (
         <div className="empty-state">
           <p>Everything's up to date. 🎉</p>
-          <button type="button" className="btn btn-sm" onClick={() => setFilterPersisted('all')}>
-            Show all containers
-          </button>
+          {filter === 'updates' && (
+            <button type="button" className="btn btn-sm" onClick={() => setFilterPersisted('all')}>
+              Show all containers
+            </button>
+          )}
         </div>
       )}
 
-      {!loading && !error && totalVisible > 0 && (
+      {!loading && !error && mainCount > 0 && (
         <div className="dashboard-groups">
           {groups.map((g) => (
             <StackGroup
@@ -319,12 +324,37 @@ export default function Dashboard({ onPendingCountChange }) {
                     container={container}
                     onSettled={handleSettled}
                     onPinChange={load}
+                    onHidden={load}
                     registerRunner={registerRunner}
                   />
                 ))}
               </div>
             </StackGroup>
           ))}
+        </div>
+      )}
+
+      {!loading && !error && pinnedItems.length > 0 && (
+        <div className="dashboard-groups pinned-groups">
+          <StackGroup
+            title="Pinned versions"
+            count={pinnedItems.length}
+            storageKey="__pinned__"
+            defaultOpen={false}
+          >
+            <div className="dashboard-list">
+              {pinnedItems.map((container) => (
+                <UpdateCard
+                  key={container.name}
+                  container={container}
+                  onSettled={handleSettled}
+                  onPinChange={load}
+                  onHidden={load}
+                  registerRunner={registerRunner}
+                />
+              ))}
+            </div>
+          </StackGroup>
         </div>
       )}
     </div>
