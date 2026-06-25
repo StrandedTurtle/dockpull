@@ -82,6 +82,12 @@ export function checkNow() {
   return post('/check');
 }
 
+// Config diagnostics for the dashboard banner. Returns
+// { stacks: { stacksDir, mounted } }.
+export function getDiagnostics() {
+  return get('/diagnostics');
+}
+
 export function startUpdate(name) {
   return post(`/update/${encodeURIComponent(name)}`);
 }

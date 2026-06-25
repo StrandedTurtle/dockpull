@@ -10,7 +10,6 @@ services:
     environment:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - SESSION_SECRET=${SESSION_SECRET}
-      - DIUN_WEBHOOK_TOKEN=${DIUN_WEBHOOK_TOKEN}
       - STACKS_DIR=${STACKS_DIR}
     volumes:
       # Required so dockerode/the docker CLI inside the container can talk
@@ -35,17 +34,7 @@ volumes:
   diun-updater-data:
 
 # ---------------------------------------------------------------------------
-# Diun webhook notifier configuration
+# No external notifier needed. This app checks your images' registries for
+# updates on its own (when you open it, and on a background schedule). Diun is
+# not required.
 # ---------------------------------------------------------------------------
-# Add a webhook notifier to your Diun config so it pushes update events to
-# this app:
-#
-# notif:
-#   webhook:
-#     endpoint: http://diun-updater:5000/api/diun/webhook
-#     method: POST
-#     headers:
-#       Authorization: "Bearer ${DIUN_WEBHOOK_TOKEN}"
-#
-# (Use the diun-updater service/container name or its reachable host/IP in
-# place of `diun-updater` if Diun runs on a different Docker network.)

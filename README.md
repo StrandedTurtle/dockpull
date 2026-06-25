@@ -1,17 +1,21 @@
 # Diun Web Updater
 
 A small, self-hosted, mobile-first web UI for updating Docker containers that
-are managed by `docker compose` (e.g. via [Dockge](https://github.com/louislam/dockge)),
-with "update available" signals supplied by [Diun](https://crazymax.dev/diun/)
-webhooks.
+are managed by `docker compose` (e.g. via [Dockge](https://github.com/louislam/dockge)).
+It checks your images' registries for newer versions and lets you apply updates
+with one tap — **manually, never automatically** (no watchtower-style surprise
+upgrades).
 
-It exists to replace this workflow: *Diun pings Discord at 9am → you open
-Dockge on your phone (which is awkward on mobile) → you cross-reference which
-stack to update → you click update.* Instead you get one screen that lists your
-containers, shows which have updates, and updates them with one tap — **manually,
-never automatically** (no watchtower-style surprise upgrades).
+It exists to replace this workflow: *something pings you that an update exists →
+you open Dockge on your phone (which is awkward on mobile) → you cross-reference
+which stack to update → you click update.* Instead you get one screen that lists
+your containers grouped by stack, shows which have updates, and updates them with
+one tap.
 
-![one container per card, badge when an update is available, tap Update to pull + recreate]
+> **Self-contained.** This app talks to your Docker socket and queries image
+> registries directly. It does **not** require Diun (or any external notifier).
+
+![one card per container, grouped by stack, badge when an update is available, tap Update to pull + recreate]
 
 ---
 
@@ -24,11 +28,9 @@ never automatically** (no watchtower-style surprise upgrades).
 - [Step-by-step setup](#step-by-step-setup)
   - [1. Get the code onto your server](#1-get-the-code-onto-your-server)
   - [2. Create your `.env`](#2-create-your-env)
-  - [3. Configure the compose file](#3-configure-the-compose-file)
+  - [3. Configure the compose file (the same-path mount)](#3-configure-the-compose-file-the-same-path-mount)
   - [4. Build and start](#4-build-and-start)
-  - [5. Point Diun at the app (the webhook)](#5-point-diun-at-the-app-the-webhook)
-  - [6. Put them on the same network](#6-put-them-on-the-same-network)
-  - [7. (Optional) Expose it with a Cloudflare Tunnel](#7-optional-expose-it-with-a-cloudflare-tunnel)
+  - [5. (Optional) Expose it with a Cloudflare Tunnel](#5-optional-expose-it-with-a-cloudflare-tunnel)
 - [Using the app](#using-the-app)
 - [Configuration reference](#configuration-reference)
 - [Security notes](#security-notes-read-this)
@@ -40,26 +42,22 @@ never automatically** (no watchtower-style surprise upgrades).
 
 ## How it works
 
-1. **Diun watches your images.** When a tracked image gets a new digest, Diun
-   POSTs a webhook event to `POST /api/diun/webhook` on this app (authenticated
-   with a bearer token). The event (image, normalized ref, digest, status) is
-   stored in SQLite. *Your existing Diun notifiers — Discord, etc. — keep
-   working; this is just an additional notifier.*
-2. **The dashboard reconciles against live Docker state.** When you open the
-   app, it lists your containers from the Docker socket and reads each one's
-   **currently-running image digest**. If there's an unresolved Diun event for
-   that image whose digest differs from what's running, the container is flagged
-   **Update available**. Because the running digest is the source of truth, the
-   badge is self-correcting: if you update a container elsewhere (e.g. Dockge),
-   the badge clears on the next refresh.
+1. **You open the app and it checks.** On load (and whenever you tap **Check for
+   updates**), the app lists your containers from the Docker socket, reads each
+   one's **currently-running image digest**, and asks each image's registry for
+   the current digest of its tag — without pulling anything. Anything whose
+   registry digest differs from what's running is flagged **Update available**.
+2. **Live Docker state is the source of truth.** The badge is self-correcting:
+   if you update a container elsewhere (e.g. Dockge), the badge clears on the
+   next check, because the app always reconciles against the digest that's
+   actually running.
 3. **You click Update.** The app runs `docker compose pull` then
    `docker compose up -d` for that one service, using the compose file recorded
    in the container's own labels, and streams the live output back to your
    browser. On success it records the update in history and clears the badge.
-   **There is no scheduler and no auto-update** — nothing changes until you tap
-   Update.
+   **There is no auto-update** — nothing changes until you tap Update.
 
-The full endpoint/payload reference is in [`API_CONTRACT.md`](./API_CONTRACT.md).
+The full endpoint/field reference is in [`API_CONTRACT.md`](./API_CONTRACT.md).
 
 ---
 
@@ -67,16 +65,15 @@ The full endpoint/payload reference is in [`API_CONTRACT.md`](./API_CONTRACT.md)
 
 - A Linux host with **Docker** and the **`docker compose` v2** plugin.
 - Your stacks are managed by `docker compose` (Dockge counts — it's compose
-  under the hood). Containers must carry the standard
-  `com.docker.compose.*` labels, which compose adds automatically.
-- **Diun** already running (or willing to run) with a `docker` provider.
-- Your compose stacks live in one directory on the host (e.g.
-  `/home/youruser/docker/stacks` or Dockge's `/opt/stacks`).
+  under the hood). Containers must carry the standard `com.docker.compose.*`
+  labels, which compose adds automatically.
+- Your compose stacks live in one directory on the host (Dockge's default is
+  `/opt/stacks`).
 
 > **One hard rule:** the stacks directory must be bind-mounted into this
 > container at the **same absolute path** it has on the host. See
-> [step 3](#3-configure-the-compose-file) and [security notes](#security-notes-read-this)
-> for why.
+> [step 3](#3-configure-the-compose-file-the-same-path-mount) and
+> [security notes](#security-notes-read-this) for why.
 
 ---
 
@@ -87,18 +84,15 @@ The full endpoint/payload reference is in [`API_CONTRACT.md`](./API_CONTRACT.md)
 git clone <your-fork-url> diupdater && cd diupdater
 cp .env.example .env
 
-# generate two secrets and a password, paste them into .env
-openssl rand -hex 32   # -> SESSION_SECRET
-openssl rand -hex 32   # -> DIUN_WEBHOOK_TOKEN
+# fill in .env:
+openssl rand -hex 32          # -> paste as SESSION_SECRET
 # set ADMIN_PASSWORD to something strong
-# set STACKS_DIR to the absolute host path of your compose stacks
+# set STACKS_DIR to the absolute host path of your compose stacks (e.g. /opt/stacks)
 
 docker compose up -d --build
 ```
 
-Then add the webhook notifier to Diun ([step 5](#5-point-diun-at-the-app-the-webhook)),
-put both services on the same Docker network ([step 6](#6-put-them-on-the-same-network)),
-and open `http://<host-ip>:5000`.
+Then open `http://<host-ip>:5000` and log in with `ADMIN_PASSWORD`.
 
 ---
 
@@ -106,8 +100,9 @@ and open `http://<host-ip>:5000`.
 
 If you already manage stacks with Docker Compose (or Dockge), the quickest path
 is the **prebuilt image** — no cloning, no building. Drop this service into an
-existing compose file (e.g. the `management` stack alongside Diun) and fill in
-the three secrets:
+existing compose file (e.g. a `management` stack) and fill in the two secrets.
+**Set both the `STACKS_DIR` env and the stacks volume to your real stacks path**
+(Dockge users: `/opt/stacks`):
 
 ```yaml
 services:
@@ -118,43 +113,40 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - ADMIN_PASSWORD=change-me                 # your login password
-      - SESSION_SECRET=REPLACE_ME                # openssl rand -hex 32
-      - DIUN_WEBHOOK_TOKEN=REPLACE_ME            # openssl rand -hex 32
-      - STACKS_DIR=/home/youruser/docker/stacks  # absolute host path to your stacks
+      - ADMIN_PASSWORD=change-me        # your login password
+      - SESSION_SECRET=REPLACE_ME       # openssl rand -hex 32
+      - STACKS_DIR=/opt/stacks          # absolute host path to your stacks
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      # ⚠️ SAME absolute path on the host AND inside the container — otherwise
-      #    relative bind mounts in your other stacks break on recreate.
-      - /home/youruser/docker/stacks:/home/youruser/docker/stacks
+      # ⚠️ SAME absolute path on the host AND inside the container. This MUST
+      #    match STACKS_DIR above, or updates fail with "compose file not found"
+      #    and relative bind mounts in your other stacks break on recreate.
+      - /opt/stacks:/opt/stacks
       - diun-updater-data:/data
 
 volumes:
   diun-updater-data:
 ```
 
-Generate the two secrets (`openssl rand -hex 32` each), then start just this
-service:
+Generate the secret (`openssl rand -hex 32`), then start just this service:
 
 ```bash
 docker compose up -d diun-updater
 ```
 
-Finish by adding the Diun webhook notifier ([step 5](#5-point-diun-at-the-app-the-webhook)),
-making sure Diun and `diun-updater` share a Docker network ([step 6](#6-put-them-on-the-same-network)),
-then open `http://<host-ip>:5000`.
+Then open `http://<host-ip>:5000`.
 
 **Image tags:** `:edge` tracks the latest commit on `main`; cutting a release
 tag (`git tag v0.1.0 && git push origin v0.1.0`) also publishes `:latest` and
 semver tags (`:0.1.0`, `:0.1`). Pin to a version for stability.
 
 > **Can't pull the image?** The GHCR package inherits the repo's visibility. To
-> let other hosts/people pull it without auth, make the package public: GitHub →
-> your avatar → **Packages** → `diupdater` → **Package settings** → **Change
+> let other hosts pull it without auth, make the package public: GitHub → your
+> avatar → **Packages** → `diupdater` → **Package settings** → **Change
 > visibility** → *Public*. Otherwise run `docker login ghcr.io` (with a PAT that
 > has `read:packages`) on each host first.
 
-The [same-path mount](#3-configure-the-compose-file) and
+The [same-path mount](#3-configure-the-compose-file-the-same-path-mount) and
 [Docker-socket](#security-notes-read-this) warnings apply here too. Prefer to
 build from source? Use [Step-by-step setup](#step-by-step-setup) below instead.
 
@@ -163,9 +155,6 @@ build from source? Use [Step-by-step setup](#step-by-step-setup) below instead.
 ## Step-by-step setup
 
 ### 1. Get the code onto your server
-
-Clone (or copy) this repository onto the Docker host. The whole app builds from
-this directory.
 
 ```bash
 git clone <your-fork-url> diupdater
@@ -178,74 +167,54 @@ cd diupdater
 cp .env.example .env
 ```
 
-Edit `.env` and set every required value:
+Edit `.env` and set the required values:
 
 ```ini
 # --- required ---
 ADMIN_PASSWORD=choose-a-strong-password
 SESSION_SECRET=<paste output of: openssl rand -hex 32>
-DIUN_WEBHOOK_TOKEN=<paste output of: openssl rand -hex 32>
 
-# Absolute host path of your compose stacks (Dockge users: usually /opt/stacks)
-STACKS_DIR=/home/youruser/docker/stacks
+# Absolute host path of your compose stacks (Dockge users: /opt/stacks)
+STACKS_DIR=/opt/stacks
 
 # --- optional (defaults shown) ---
 PORT=5000
 DOCKER_SOCKET=/var/run/docker.sock
 DATA_DIR=/data
 SESSION_TTL=604800
-BASE_URL=http://localhost:5000   # set to your real URL if behind a tunnel/proxy (https)
-```
-
-Generate the two secrets:
-
-```bash
-openssl rand -hex 32   # SESSION_SECRET  (signs the login cookie)
-openssl rand -hex 32   # DIUN_WEBHOOK_TOKEN  (Diun must present this to post events)
+BASE_URL=http://localhost:5000   # set to your real https URL if behind a tunnel/proxy
 ```
 
 > If `BASE_URL` starts with `https`, the login cookie is marked `Secure` (only
-> sent over HTTPS). Keep it `http://...` for plain LAN access, set it to your
+> sent over HTTPS). Keep it `http://...` for plain LAN access; set it to your
 > `https://...` hostname when serving over a tunnel/reverse proxy.
 
-### 3. Configure the compose file
+### 3. Configure the compose file (the same-path mount)
 
 The provided [`docker-compose.yml`](./docker-compose.yml) is ready to use. The
 critical part is the **same-path stacks mount**:
 
 ```yaml
-services:
-  diun-updater:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
-    container_name: diun-updater
-    restart: unless-stopped
-    ports:
-      - "5000:5000"
-    environment:
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
-      - SESSION_SECRET=${SESSION_SECRET}
-      - DIUN_WEBHOOK_TOKEN=${DIUN_WEBHOOK_TOKEN}
-      - STACKS_DIR=${STACKS_DIR}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # ⚠️ SAME PATH on host and in container — do not change one side only:
       - ${STACKS_DIR}:${STACKS_DIR}
       - diun-updater-data:/data        # persistent SQLite (events/history/pins)
-
-volumes:
-  diun-updater-data:
 ```
 
 **Why same-path?** This app calls `docker compose` against the *host* Docker
-daemon over the socket. The daemon resolves relative paths in your stacks'
-compose files (volumes like `./data:/data`, build contexts, `env_file`) against
-the path it sees on the host. If this container saw the stacks at `/stacks` but
-the host has them at `/home/youruser/docker/stacks`, every relative bind mount
-would resolve to a path that doesn't exist on the host and your volumes would
-break on recreate. Mounting at the identical path keeps them correct. (This is
-the same constraint Dockge imposes, for the same reason.)
+daemon over the socket, but the `docker compose` CLI reads the compose file from
+*this container's* filesystem, and the daemon resolves relative paths in your
+stacks' compose files (volumes like `./data:/data`, build contexts, `env_file`)
+against the path it sees on the host. If this container saw the stacks at
+`/stacks` but the host has them at `/opt/stacks`, the CLI couldn't find the
+compose file (you'd get `open /opt/stacks/<stack>/compose.yaml: no such file or
+directory`) and any relative bind mount would resolve to a non-existent host
+path. Mounting at the identical path keeps both correct. (This is the same
+constraint Dockge imposes, for the same reason.)
+
+> If the stacks dir isn't mounted at the right path, the app shows a warning
+> banner at the top of the dashboard so you can fix it before an update fails.
 
 ### 4. Build and start
 
@@ -262,62 +231,14 @@ docker logs diun-updater                    # -> "...server listening at ..."
 
 The SQLite database is created automatically in the `diun-updater-data` volume
 on first start. The first time you load the UI you'll get the login screen —
-enter `ADMIN_PASSWORD`.
+enter `ADMIN_PASSWORD`, and the dashboard will run an initial update check.
 
-> **Prefer a prebuilt image?** Tagged releases publish a multi-arch image
+> **Prefer a prebuilt image?** Releases publish a multi-arch image
 > (`linux/amd64` + `linux/arm64`) to GHCR. Instead of `build:`, point the
-> compose service at it and skip the build:
->
-> ```yaml
-> services:
->   diun-updater:
->     image: ghcr.io/strandedturtle/diupdater:latest
->     # ...keep the same environment + volumes as above...
-> ```
->
-> Then `docker compose up -d` (no `--build`).
+> compose service at `image: ghcr.io/strandedturtle/diupdater:edge` (keep the
+> same environment + volumes) and `docker compose up -d` (no `--build`).
 
-### 5. Point Diun at the app (the webhook)
-
-Add a `webhook` notifier to your Diun config (this is **in addition to** your
-existing Discord notifier — keep both). In Diun's `diun.yml`:
-
-```yaml
-notif:
-  # ... your existing discord notifier stays here ...
-  webhook:
-    endpoint: http://diun-updater:5000/api/diun/webhook
-    method: POST
-    headers:
-      Authorization: "Bearer <your DIUN_WEBHOOK_TOKEN>"
-```
-
-Use the **same token** you put in `.env`. Then restart Diun
-(`docker compose up -d diun`).
-
-> Diun only fires a webhook **when a digest changes** — it does not re-send on a
-> schedule. So a brand-new install won't show any badges until Diun next detects
-> an update. To test immediately, see [Troubleshooting → "No badges appear"](#troubleshooting).
-
-### 6. Put them on the same network
-
-For `http://diun-updater:5000` to resolve from the Diun container, both
-containers must share a Docker network. If they're in the same compose project,
-that's automatic. If Diun is in a different project, attach both to a shared
-external network, e.g.:
-
-```yaml
-# in both diun's and diun-updater's compose files
-networks:
-  default:
-    name: management
-    external: true
-```
-
-Alternatively, point Diun's `endpoint` at the host IP/port instead of the
-service name (e.g. `http://192.168.1.10:5000/api/diun/webhook`).
-
-### 7. (Optional) Expose it with a Cloudflare Tunnel
+### 5. (Optional) Expose it with a Cloudflare Tunnel
 
 Add a hostname to your tunnel config pointing at the app, then set
 `BASE_URL=https://updates.example.org` in `.env` and restart so the login cookie
@@ -336,52 +257,44 @@ For extra safety you can also put **Cloudflare Access** in front of it.
 
 Open `http://<host>:5000` (or your tunnel URL) and log in with `ADMIN_PASSWORD`.
 
-**Updates tab (home).** One card per container:
-- **Update available** cards show a highlighted badge and the
-  `Current → Available` short digests.
-- Tap **Update** to pull the new image and recreate that service. The card shows
-  a spinner; tap **Show logs** to watch the live `docker compose pull` / `up -d`
-  output stream in. When it finishes you get a success/error message and the
-  badge clears.
+**Updates tab (home).** Containers are **grouped by stack** (their compose
+project / Dockge folder) in collapsible sections, with anything that has an
+update sorted to the top. By default the list shows **only containers that need
+an update**; flip the filter to **All** to see everything.
+
+- When you open the app it automatically runs a check. **Check for updates**
+  re-runs it on demand (queries each image's registry for a newer digest).
+- Each card shows the image, its **version** (from the image's
+  `org.opencontainers.image.version` label when present, otherwise its tag), and
+  whether an update is available.
+- Tap **Update** to pull the new image and recreate that service. Tap **Show
+  logs** to watch the live `docker compose pull` / `up -d` output. When it
+  finishes you get a success/error message and the badge clears.
 - **Update all** runs every eligible container one at a time (a failure on one
   doesn't stop the rest).
-- **Check** actively queries the registries for newer digests right now, instead
-  of waiting for Diun (see [Active update checks](#active-update-checks)).
-- **Refresh** re-reads live state from Docker.
-- The dashboard also **updates itself live** — when a Diun webhook arrives, a
-  check runs, or an update finishes, the list refreshes automatically (no need to
-  hit Refresh).
-- The **pin** icon hides a container's update badge (useful to "ignore this one
-  for now"). Pinned items can still be updated manually; manage/unpin them from
-  Settings.
+- The dashboard **updates itself live** — when a check runs or an update
+  finishes, the list refreshes automatically.
+- **Pin Version** holds a container at its current version (it stops being
+  flagged for updates and moves to a separate section). You can still update it
+  manually.
 
 **History tab.** A log of past updates (container, image, old→new digest,
-success/failure, relative time). Tap a row to expand full details; "Load more"
-pages through older entries.
+success/failure, relative time). Tap a row to expand; "Load more" pages older
+entries.
 
-**Settings tab.**
-- **Appearance** — dark/light theme toggle (also in the header); the choice
-  persists across reloads.
-- **Pinned images** — list of pinned refs with an Unpin button.
-- **About** — app info and a server-health indicator.
+**Settings tab.** Theme (dark/light), pinned-version management, and a
+server-health indicator.
 
 **Install as a mobile app (PWA).** In your phone's browser, use "Add to Home
-Screen". It installs as a standalone, full-screen app with an icon — this is the
-mobile experience that replaces fiddling with Dockge.
+Screen". It installs as a standalone, full-screen app with an icon.
 
-### Active update checks
+### About the update check
 
-The **Check** button (and `POST /api/check`) makes the app query the registries
-directly for each running image's current digest and flag anything out of date —
-independent of Diun. This is useful for a first run (Diun only sends a webhook
-*when a digest changes*, so a fresh install is otherwise quiet), to recover from
-a webhook that was missed while the app was down, or if you'd rather not depend
-on Diun at all.
-
-It currently supports registries reachable **anonymously** over the standard
-token flow — Docker Hub, GHCR, lscr.io, quay.io, etc. for public images. Private
-images that require credentials are skipped (counted under `errors`) and still
-rely on Diun's webhook for their signal.
+The check queries registries directly for each running image's current digest
+and flags anything out of date. It supports registries reachable **anonymously**
+over the standard token flow — Docker Hub, GHCR, lscr.io, quay.io, etc. for
+public images. Private images that require credentials are skipped (counted
+under `errors`).
 
 ---
 
@@ -393,7 +306,6 @@ All configuration is via environment variables (see `.env.example`).
 |---|---|---|---|
 | `ADMIN_PASSWORD` | — | ✅ | Single shared login password. |
 | `SESSION_SECRET` | — | ✅ | Signs the session cookie. `openssl rand -hex 32`. |
-| `DIUN_WEBHOOK_TOKEN` | — | ✅ | Bearer token Diun must present to post events. `openssl rand -hex 32`. |
 | `STACKS_DIR` | `/stacks` | ✅ (effectively) | Host path of your compose stacks. **Must be mounted at the identical path in the container.** |
 | `PORT` | `5000` | | Server listen port. |
 | `DOCKER_SOCKET` | `/var/run/docker.sock` | | Docker socket path. |
@@ -402,7 +314,7 @@ All configuration is via environment variables (see `.env.example`).
 | `BASE_URL` | `http://localhost:5000` | | Public URL; if `https`, the cookie is set `Secure`. |
 | `SELF_CONTAINER_NAME` | `diun-updater` | | This app's own container name, excluded from the dashboard so it can't update itself. |
 
-The three required vars are enforced at startup — the server refuses to boot
+The two required vars are enforced at startup — the server refuses to boot
 without them (a `SKIP_CONFIG_CHECK=1` escape hatch exists for skeleton
 smoke-tests only; never use it in production).
 
@@ -414,12 +326,9 @@ smoke-tests only; never use it in production).
   gives this app full control over every container, image, network, and volume
   on the host — effectively root on the host. Run it only on hosts you trust,
   keep it on an internal network, and keep it behind the login (and ideally a
-  reverse proxy with TLS or Cloudflare Access). Note that mounting the socket
-  `:ro` does **not** restrict this — `:ro` only makes the socket *file*
-  read-only; the Docker API still allows writes.
-- **The webhook endpoint is the one public, cookie-less route.** It's protected
-  by `DIUN_WEBHOOK_TOKEN` (constant-time compared). Treat that token like a
-  password and don't expose the app publicly without a proxy if you can avoid it.
+  reverse proxy with TLS or Cloudflare Access). Mounting the socket `:ro` does
+  **not** restrict this — `:ro` only makes the socket *file* read-only; the
+  Docker API still allows writes.
 - **Auth** is a single password compared in constant time, issuing a signed,
   `httpOnly`, `SameSite=Lax` cookie (`Secure` when `BASE_URL` is https). Failed
   logins are rate-limited per client IP (lockout after repeated failures) to
@@ -433,40 +342,28 @@ smoke-tests only; never use it in production).
 
 ## Troubleshooting
 
-**"No badges appear" / nothing shows as updatable.**
-Diun only sends a webhook when a digest *changes*, so a fresh setup is quiet
-until then. Confirm the pipe works by posting a fake event for an image you're
-running an older version of (replace the token and image):
-
-```bash
-curl -i -X POST http://localhost:5000/api/diun/webhook \
-  -H "Authorization: Bearer <DIUN_WEBHOOK_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"status":"update","image":"nginx:latest","digest":"sha256:deadbeef"}'
-# -> HTTP/1.1 204
-```
-
-Refresh the dashboard; the matching container should now show **Update
-available**. (Use a real newer digest, or just any different digest, to test the
-indicator.)
-
-**Webhook returns 401.** The `Authorization: Bearer ...` token in Diun's config
-doesn't match `DIUN_WEBHOOK_TOKEN`. Re-copy it and restart Diun.
+**Update fails with `compose file not found` / `no such file or directory`.**
+This is the **same-path mount**. The `docker compose` CLI runs inside this
+container and reads your compose file from this container's filesystem, so your
+stacks dir must be mounted at the identical absolute path on both sides
+(`${STACKS_DIR}:${STACKS_DIR}`), and `STACKS_DIR` must match where your compose
+files actually live on the host (Dockge: `/opt/stacks`). The dashboard shows a
+warning banner when it detects the stacks dir isn't mounted.
 
 **`GET /api/containers` returns 503 `docker_unavailable`.** The app can't reach
 the Docker daemon. Check the socket is mounted (`/var/run/docker.sock`) and the
 path matches `DOCKER_SOCKET`.
 
-**Update fails with "compose file not found" or volumes break after update.**
-Almost always the **same-path mount**. Verify the stacks directory is mounted at
-the identical absolute path on both sides (`${STACKS_DIR}:${STACKS_DIR}`), and
-that `STACKS_DIR` matches where your compose files actually live on the host.
+**A check reports updates under `errors` / some images never flag.** Those
+images are on registries that need credentials (private images), which the
+anonymous check can't query. Public images on Docker Hub / GHCR / lscr.io /
+quay.io work.
 
 **Badge won't clear after a successful update.** A successful update resolves the
 pending event automatically (this also covers multi-arch images, where the
 registry digest and the running digest legitimately differ). If a badge sticks,
-hit **Refresh**; if it persists, there may be a genuinely newer event — check
-the History tab and `docker logs diun-updater`.
+tap **Check for updates** again; if it persists, there may be a genuinely newer
+image — check the History tab and `docker logs diun-updater`.
 
 **Can't log in / cookie not sticking.** If you're on `https`, make sure
 `BASE_URL` is your `https://` URL (otherwise the `Secure` cookie won't be set
@@ -476,10 +373,8 @@ appropriately). Clear the cookie and retry.
 
 ## Known limitations
 
-- **Missed webhooks aren't re-sent.** If the app is down when Diun fires, that
-  event is lost until the image changes again. The dashboard self-heals on the
-  next change because it always reconciles against live Docker state, but there's
-  no active "re-check registries now" button in this version.
+- **The update check needs registries reachable anonymously.** Private images
+  that require credentials are skipped for now.
 - **Standalone (non-compose) containers** are updated on a best-effort basis
   (pull + recreate preserving config); compose-managed containers are the
   supported path and what you should rely on.
@@ -496,7 +391,7 @@ Run the server and client separately (two terminals):
 cd server
 npm install
 # provide the required env vars (or SKIP_CONFIG_CHECK=1 for a no-secrets boot)
-ADMIN_PASSWORD=dev SESSION_SECRET=dev DIUN_WEBHOOK_TOKEN=dev DATA_DIR=./.data npm start
+ADMIN_PASSWORD=dev SESSION_SECRET=dev DATA_DIR=./.data npm start
 
 # Terminal 2 — Vite dev server on :5173 (proxies /api to :5000)
 cd client
@@ -510,7 +405,7 @@ Open `http://localhost:5173`. Without a Docker daemon, `/api/containers` returns
 Run the server test suite and build the client:
 
 ```bash
-cd server && npm test         # node --test  (reconcile, containers-service, auth)
+cd server && npm test         # node --test  (reconcile, containers-service, auth, registry)
 cd client && npm run build    # production bundle -> client/dist/
 ```
 

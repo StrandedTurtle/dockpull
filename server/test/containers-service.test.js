@@ -6,6 +6,8 @@ function makeContainer(overrides = {}) {
   return {
     name: 'nginx',
     image: 'nginx:latest',
+    tag: 'latest',
+    currentVersion: null,
     currentDigest: 'sha256:aaa',
     project: 'web',
     service: 'nginx',
@@ -78,6 +80,8 @@ describe('buildContainerItems', () => {
       project: 'web',
       service: 'nginx',
       image: 'nginx:latest',
+      tag: 'latest',
+      currentVersion: null,
       currentDigest: 'sha256:aaa',
       updateAvailable: false,
       availableDigest: null,

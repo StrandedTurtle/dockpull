@@ -12,13 +12,10 @@ All request/response bodies are JSON unless noted otherwise.
 - On successful login, the server sets a signed, httpOnly cookie named
   `diun_session` (`SameSite=Lax`, `Secure` when served over HTTPS,
   `Max-Age` = `SESSION_TTL` seconds).
-- Protected routes (everything except `/api/auth/login`, `/api/health`, and
-  `/api/diun/webhook`) require a valid `diun_session` cookie. If it is
-  missing, invalid, or expired, the server responds `401 Unauthorized` with
+- Protected routes (everything except `/api/auth/login` and `/api/health`)
+  require a valid `diun_session` cookie. If it is missing, invalid, or
+  expired, the server responds `401 Unauthorized` with
   `{ "error": "unauthorized" }`.
-- The Diun webhook route uses a separate auth mechanism: a static bearer
-  token (`DIUN_WEBHOOK_TOKEN`) in the `Authorization` header. It does not
-  use the session cookie.
 
 ## Endpoints
 
@@ -43,18 +40,19 @@ All request/response bodies are JSON unless noted otherwise.
 - Auth: cookie (optional — never errors, reports status).
 - Response: `200 { "authenticated": boolean }`
 
-### `POST /api/diun/webhook`
-
-- Auth: token — header `Authorization: Bearer <DIUN_WEBHOOK_TOKEN>`. `401`
-  if missing/invalid.
-- Body: Diun webhook payload (see below).
-- Response: `204 No Content` on successful ingest. `400` if the payload is
-  malformed.
-
 ### `GET /api/containers`
 
 - Auth: cookie.
 - Response: `200` — array of container items (shape below).
+
+### `GET /api/diagnostics`
+
+- Auth: cookie.
+- Response: `200 { "stacks": { "stacksDir": "/opt/stacks", "mounted": true } }`.
+  `mounted` is `false` when the configured `STACKS_DIR` isn't present inside
+  the container (the host stacks dir isn't mounted, or is mounted at a
+  different path) — which breaks compose-based updates. The dashboard uses
+  this to warn before an update is attempted.
 
 ### `POST /api/check`
 
@@ -162,13 +160,15 @@ always returns normalized refs.
   "project": "web",
   "service": "nginx",
   "image": "nginx:latest",
+  "tag": "latest",
+  "currentVersion": "1.27.3",
   "currentDigest": "sha256:...",
   "updateAvailable": true,
   "availableDigest": "sha256:...",
   "pinned": false,
   "state": "running",
-  "composeFile": "/stacks/web/docker-compose.yml",
-  "workingDir": "/stacks/web"
+  "composeFile": "/opt/stacks/web/compose.yaml",
+  "workingDir": "/opt/stacks/web"
 }
 ```
 
@@ -178,56 +178,30 @@ Field notes:
 - `project` / `service` — derived from the `com.docker.compose.project` /
   `com.docker.compose.service` labels.
 - `image` — image ref as configured (tag, not digest).
+- `tag` — the tag portion of `image` (e.g. `latest`, `1.27`), or `null` if
+  the ref is digest-pinned.
+- `currentVersion` — human-readable version from the running image's
+  `org.opencontainers.image.version` label, if it sets one (else `null`).
 - `currentDigest` — digest of the image the running container was created
   from.
-- `updateAvailable` — `true` if the most recent unresolved Diun event for
-  this image's normalized ref reports a digest different from
-  `currentDigest`.
+- `updateAvailable` — `true` if the most recent unresolved update event
+  (from the registry check) for this image's normalized ref reports a digest
+  different from `currentDigest`.
 - `availableDigest` — the digest from that unresolved event, if any (else
   `null`).
-- `pinned` — `true` if the image ref is in the `pinned` table (update
-  indicator is suppressed, but manual update is still allowed).
+- `pinned` — `true` if the image ref is in the `pinned` table ("Pin Version":
+  update indicator is suppressed and the container is grouped separately, but
+  a manual update is still allowed).
 - `state` — Docker container state (`running`, `exited`, etc.).
 - `composeFile` / `workingDir` — derived from
   `com.docker.compose.project.config_files` /
   `com.docker.compose.project.working_dir` labels; used to run `docker
   compose` commands for that container.
 
-## Diun webhook payload
+## Update events
 
-Diun's webhook notifier posts a JSON body shaped roughly like:
-
-```json
-{
-  "status": "update",
-  "image": "nginx:latest",
-  "digest": "sha256:abc123...",
-  "provider": "docker",
-  "hub_link": "https://hub.docker.com/_/nginx",
-  "platform": "linux/amd64",
-  "metadata": {
-    "hostname": "docker-host-1",
-    "container": "nginx",
-    "...": "additional Diun metadata fields"
-  }
-}
-```
-
-Fields we read:
-
-- `status` — `"new"` (first time Diun sees this image) or `"update"` (a
-  newer digest was found). Both are recorded; only `"update"` events are
-  meaningful for the update indicator.
-- `image` — the image ref Diun checked, used to derive `normalized_ref`
-  (registry/repo without tag-specific noise, used to key
-  `update_events.normalized_ref`).
-- `digest` — the new digest Diun observed.
-- `provider` — Diun provider (`docker`, `swarm`, etc.) — stored for
-  reference.
-- `hub_link` — informational link, stored for reference.
-- `platform` — image platform string, stored for reference.
-- `metadata` — passthrough object with additional Diun-provided context;
-  stored as part of `raw_json`, not parsed individually.
-
-The full raw payload is stored as `raw_json` in `update_events` for
-debugging/audit, regardless of which fields are explicitly parsed.
+`update_events` rows are produced solely by the active registry check
+(`POST /api/check` and the background scheduler). Each records the
+`normalized_ref` and the registry-reported `digest`; a row is `resolved` once
+the running container's digest matches it (the update was applied). There is
+no external notifier — the app queries registries directly.

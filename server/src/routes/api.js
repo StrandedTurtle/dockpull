@@ -8,7 +8,7 @@
  */
 
 import express from 'express';
-import { listContainers } from '../docker.js';
+import { listContainers, stacksDirStatus } from '../docker.js';
 import { buildContainerItems } from '../containers-service.js';
 import { normalizeRef } from '../reconcile.js';
 import { runCheck } from '../checker.js';
@@ -54,7 +54,14 @@ apiRouter.get('/api/containers', async (req, res) => {
   return res.status(200).json(items);
 });
 
-// Actively check registries for newer digests (independent of Diun webhooks).
+// Lightweight config/health diagnostics for the dashboard to surface
+// actionable warnings (currently: whether the stacks dir is actually mounted
+// inside the container, without which compose-based updates fail).
+apiRouter.get('/api/diagnostics', (req, res) => {
+  return res.status(200).json({ stacks: stacksDirStatus() });
+});
+
+// Actively check registries for newer digests.
 apiRouter.post('/api/check', async (req, res) => {
   let result;
   try {
@@ -68,7 +75,7 @@ apiRouter.post('/api/check', async (req, res) => {
 });
 
 // Global SSE channel: emits {"type":"containers-changed"} when server state
-// changes (webhook event, manual check, finished update) so dashboards can
+// changes (a manual/scheduled check or a finished update) so dashboards can
 // refresh without a manual reload.
 apiRouter.get('/api/events', (req, res) => {
   subscribeGlobal(res, req);

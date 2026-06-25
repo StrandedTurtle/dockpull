@@ -934,5 +934,172 @@ a {
 .check-msg {
   margin: 0 0 12px;
   font-size: 0.85rem;
-  color: var(--text-secondary);
+  color: var(--color-text-muted);
+}
+
+/* ---------- Dashboard subtitle + filter ---------- */
+
+.dashboard-subtitle {
+  margin: -6px 0 12px;
+  font-size: 0.8rem;
+  color: var(--color-text-faint);
+}
+
+.filter-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.chip {
+  appearance: none;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-text-muted);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip.is-active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+/* ---------- Warning banner ---------- */
+
+.banner {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.banner-warn {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: var(--color-text);
+}
+
+.banner code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.78rem;
+  background: var(--color-elevated);
+  padding: 1px 4px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+/* ---------- Stack groups ---------- */
+
+.dashboard-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.stack-group {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.stack-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--color-elevated);
+  border: none;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+
+.stack-chevron {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.stack-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.stack-group-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.stack-group-badge {
+  flex-shrink: 0;
+}
+
+.stack-group-count {
+  flex-shrink: 0;
+  color: var(--color-text-faint);
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+
+.stack-group-body {
+  padding: 10px;
+}
+
+/* ---------- Card image + version rows ---------- */
+
+.card-image {
+  margin-top: 2px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.76rem;
+  color: var(--color-text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-versions {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  font-size: 0.82rem;
+}
+
+@media (min-width: 480px) {
+  .card-versions {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.version-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.version-label {
+  color: var(--color-text-faint);
+  flex-shrink: 0;
+}
+
+.version-value {
+  color: var(--color-text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-value.is-available {
+  color: var(--color-success);
 }

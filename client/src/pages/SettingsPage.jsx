@@ -79,9 +79,9 @@ export default function SettingsPage() {
       </section>
 
       <section className="settings-section">
-        <h3>Pinned images</h3>
+        <h3>Pinned versions</h3>
         {pinnedLoading && (
-          <div className="dashboard-list" aria-busy="true" aria-label="Loading pinned images">
+          <div className="dashboard-list" aria-busy="true" aria-label="Loading pinned versions">
             <div className="skeleton-card" style={{ height: 52 }} />
             <div className="skeleton-card" style={{ height: 52 }} />
           </div>
@@ -98,7 +98,7 @@ export default function SettingsPage() {
 
         {!pinnedLoading && !pinnedError && pinned.length === 0 && (
           <div className="empty-state">
-            <p>No pinned images.</p>
+            <p>No pinned versions.</p>
           </div>
         )}
 
@@ -128,8 +128,8 @@ export default function SettingsPage() {
         <h3>About</h3>
         <p className="about-app-name">Diun Updater</p>
         <p className="settings-row-desc">
-          A small dashboard for reviewing Diun image-update notifications and applying
-          container updates by hand.
+          A small dashboard for checking your containers' images for updates and applying
+          them by hand.
         </p>
         <p className="settings-row-desc">
           Updates are always manual — this app never pulls or recreates a container on its
