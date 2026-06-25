@@ -82,12 +82,6 @@ export function checkNow() {
   return post('/check');
 }
 
-// Config diagnostics for the dashboard banner. Returns
-// { stacks: { stacksDir, mounted } }.
-export function getDiagnostics() {
-  return get('/diagnostics');
-}
-
 export function startUpdate(name) {
   return post(`/update/${encodeURIComponent(name)}`);
 }
@@ -115,6 +109,30 @@ export function pin(ref) {
 
 export function unpin(ref) {
   return del(`/pin/${encodeURIComponent(ref)}`);
+}
+
+// --- Hiding ---
+
+export function getHidden() {
+  return get('/hidden');
+}
+
+export function hideContainer(name) {
+  return post('/hide', { name });
+}
+
+export function unhideContainer(name) {
+  return del(`/hide/${encodeURIComponent(name)}`);
+}
+
+// --- Settings ---
+
+export function getSettings() {
+  return get('/settings');
+}
+
+export function updateSettings(patch) {
+  return request('PUT', '/settings', patch);
 }
 
 export { ApiError };

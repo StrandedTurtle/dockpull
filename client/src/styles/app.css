@@ -448,9 +448,57 @@ a {
 .card-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 8px;
   margin-top: 12px;
+}
+
+.card-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.card-link:hover {
+  text-decoration: underline;
+}
+
+.btn-ghost {
+  background: none;
+  border: none;
+  padding: 6px 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.btn-ghost:hover {
+  color: var(--color-text);
+}
+
+.pinned-groups {
+  margin-top: 16px;
+}
+
+.settings-error {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  color: var(--color-error);
 }
 
 .pin-toggle {

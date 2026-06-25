@@ -36,6 +36,14 @@ CREATE TABLE IF NOT EXISTS pinned (
   ref TEXT PRIMARY KEY,
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS hidden (
+  container_name TEXT PRIMARY KEY,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_events_ref ON update_events(normalized_ref, resolved);
 CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC);
 `);
@@ -81,6 +89,29 @@ const stmts = {
   `),
   isPinned: db.prepare(`
     SELECT 1 FROM pinned WHERE ref = ? LIMIT 1
+  `),
+  hide: db.prepare(`
+    INSERT INTO hidden (container_name) VALUES (?)
+    ON CONFLICT(container_name) DO NOTHING
+  `),
+  unhide: db.prepare(`
+    DELETE FROM hidden WHERE container_name = ?
+  `),
+  getHidden: db.prepare(`
+    SELECT container_name FROM hidden ORDER BY created_at DESC
+  `),
+  isHidden: db.prepare(`
+    SELECT 1 FROM hidden WHERE container_name = ? LIMIT 1
+  `),
+  getSetting: db.prepare(`
+    SELECT value FROM settings WHERE key = ? LIMIT 1
+  `),
+  getAllSettings: db.prepare(`
+    SELECT key, value FROM settings
+  `),
+  setSetting: db.prepare(`
+    INSERT INTO settings (key, value) VALUES (@key, @value)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `),
 };
 
@@ -134,6 +165,39 @@ export function getPinned() {
 
 export function isPinned(ref) {
   return stmts.isPinned.get(ref) !== undefined;
+}
+
+export function hide(containerName) {
+  return stmts.hide.run(containerName);
+}
+
+export function unhide(containerName) {
+  return stmts.unhide.run(containerName);
+}
+
+export function getHidden() {
+  return stmts.getHidden.all().map((row) => row.container_name);
+}
+
+export function isHidden(containerName) {
+  return stmts.isHidden.get(containerName) !== undefined;
+}
+
+export function getSetting(key) {
+  const row = stmts.getSetting.get(key);
+  return row ? row.value : undefined;
+}
+
+export function getAllSettings() {
+  const out = {};
+  for (const row of stmts.getAllSettings.all()) {
+    out[row.key] = row.value;
+  }
+  return out;
+}
+
+export function setSetting(key, value) {
+  return stmts.setSetting.run({ key, value: value == null ? null : String(value) });
 }
 
 export default db;

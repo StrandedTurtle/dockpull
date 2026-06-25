@@ -133,8 +133,31 @@ async function inspectImageMeta(imageIdOrName, image) {
 
   const labels = imageInfo?.Config?.Labels || {};
   const version = labels['org.opencontainers.image.version'] || null;
+  const source = normalizeSourceUrl(
+    labels['org.opencontainers.image.source'] || labels['org.opencontainers.image.url'] || null
+  );
   const digest = pickRepoDigest(imageInfo?.RepoDigests, image);
-  return { digest, version };
+  return { digest, version, source };
+}
+
+/**
+ * Normalizes an OCI source/url label into a plain https web URL, or null.
+ * Handles `git+https://`, `git@github.com:org/repo.git`, and trailing `.git`.
+ *
+ * @param {string|null} raw
+ * @returns {string|null}
+ */
+function normalizeSourceUrl(raw) {
+  if (typeof raw !== 'string') return null;
+  let url = raw.trim();
+  if (url === '') return null;
+  url = url.replace(/^git\+/, '');
+  // scp-style git remote: git@github.com:org/repo(.git)
+  const scp = url.match(/^git@([^:]+):(.+)$/);
+  if (scp) url = `https://${scp[1]}/${scp[2]}`;
+  url = url.replace(/\.git$/, '');
+  if (!/^https?:\/\//i.test(url)) return null;
+  return url;
 }
 
 /**
@@ -286,10 +309,11 @@ export async function listContainers() {
         continue;
       }
 
-      const { digest: currentDigest, version: currentVersion } = await inspectImageMeta(
-        inspectData.Image,
-        image
-      );
+      const {
+        digest: currentDigest,
+        version: currentVersion,
+        source: sourceUrl,
+      } = await inspectImageMeta(inspectData.Image, image);
 
       const labels = inspectData.Config?.Labels;
       const labelInfo = composeInfoFromLabels(labels);
@@ -315,15 +339,22 @@ export async function listContainers() {
         continue;
       }
 
+      // Flag compose-managed containers whose compose file isn't reachable
+      // from inside this container (the same-path mount is missing/wrong), so
+      // the dashboard can warn before an update is attempted.
+      const composeFileMissing = Boolean(composeFile) && !fs.existsSync(composeFile);
+
       results.push({
         name,
         image,
         tag,
         currentVersion,
+        sourceUrl: sourceUrl || null,
         currentDigest,
         project: project || null,
         service: service || null,
         composeFile: composeFile || null,
+        composeFileMissing,
         workingDir: workingDir || null,
         state: inspectData.State?.Status || summary.State || 'unknown',
         normalizedRef,
@@ -458,15 +489,19 @@ export async function updateContainer(name, onLine) {
     // compose file from this container's filesystem. If the stacks dir isn't
     // mounted here at the same absolute path it has on the host, the file
     // won't exist and compose fails with a cryptic "no such file" error.
-    // Catch it up front with an actionable message instead.
+    // Catch it up front with an actionable message — and suggest the mount
+    // derived from THIS compose file's own location (the dir above the stack
+    // folder), not config.STACKS_DIR, which may be set to the wrong path.
     if (!fs.existsSync(composeFile)) {
+      const stacksRoot = path.dirname(path.dirname(composeFile));
       return {
         success: false,
         message:
           `Compose file not found at "${composeFile}" inside the updater container. ` +
-          `Mount your stacks directory at the SAME absolute path on the host and in ` +
-          `this container (e.g. "${config.STACKS_DIR}:${config.STACKS_DIR}") and set ` +
-          `STACKS_DIR to that path. See the README "same-path mount" note.`,
+          `The directory holding your stacks must be bind-mounted at the SAME ` +
+          `absolute path on the host and in this container — add ` +
+          `"${stacksRoot}:${stacksRoot}" to this container's volumes (and set ` +
+          `STACKS_DIR=${stacksRoot}). See the README "same-path mount" note.`,
         oldDigest,
         newDigest: null,
       };
@@ -610,24 +645,6 @@ export async function updateContainer(name, onLine) {
     oldDigest,
     newDigest,
   };
-}
-
-/**
- * Diagnostic: is the configured STACKS_DIR actually present inside this
- * container? When false, the host stacks dir almost certainly isn't mounted
- * (or is mounted at a different path), which breaks compose-based updates.
- * Used by the dashboard to warn before the user hits a failed update.
- *
- * @returns {{ stacksDir: string, mounted: boolean }}
- */
-export function stacksDirStatus() {
-  let mounted = false;
-  try {
-    mounted = fs.existsSync(config.STACKS_DIR) && fs.statSync(config.STACKS_DIR).isDirectory();
-  } catch {
-    mounted = false;
-  }
-  return { stacksDir: config.STACKS_DIR, mounted };
 }
 
 export { docker };

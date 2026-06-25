@@ -43,24 +43,16 @@ All request/response bodies are JSON unless noted otherwise.
 ### `GET /api/containers`
 
 - Auth: cookie.
-- Response: `200` — array of container items (shape below).
-
-### `GET /api/diagnostics`
-
-- Auth: cookie.
-- Response: `200 { "stacks": { "stacksDir": "/opt/stacks", "mounted": true } }`.
-  `mounted` is `false` when the configured `STACKS_DIR` isn't present inside
-  the container (the host stacks dir isn't mounted, or is mounted at a
-  different path) — which breaks compose-based updates. The dashboard uses
-  this to warn before an update is attempted.
+- Response: `200` — array of container items (shape below). Each item carries
+  a `composeFileMissing` flag the dashboard uses to warn when a stack's
+  compose file isn't reachable inside the container (mount misconfigured).
 
 ### `POST /api/check`
 
 - Auth: cookie.
 - Body: none.
-- Actively queries the registry for each running image's current digest
-  (independent of Diun webhooks) and records/clears update events
-  accordingly.
+- Actively queries the registry for each running image's current digest and
+  records/clears update events accordingly.
 - Response:
   - `200 { "total": n, "checked": n, "updatesFound": n, "errors": n }`
   - `503 { "error": "docker_unavailable" }` if the Docker daemon is
@@ -70,10 +62,9 @@ All request/response bodies are JSON unless noted otherwise.
 
 - Auth: cookie.
 - Response: `text/event-stream` (SSE). Emits
-  `data: {"type":"containers-changed"}` whenever server state changes (a Diun
-  webhook arrived, a manual check ran, or an update finished) so dashboards
-  can refresh without a manual reload. Comment lines (`: ...`) are sent as
-  keepalives.
+  `data: {"type":"containers-changed"}` whenever server state changes (a check
+  ran, an update finished, or a pin/hide changed) so dashboards can refresh
+  without a manual reload. Comment lines (`: ...`) are sent as keepalives.
 
 ### `POST /api/update/:name`
 
@@ -142,10 +133,48 @@ All request/response bodies are JSON unless noted otherwise.
 - Response: `200 { "ok": true }`. Idempotent.
 
 Note: refs passed to `POST /api/pin` and `DELETE /api/pin/:ref` are
-normalized server-side (via the same `normalizeRef` used for Diun events)
-before being stored/looked up, so e.g. raw `nginx` and
+normalized server-side (via the same `normalizeRef` used elsewhere) before
+being stored/looked up, so e.g. raw `nginx` and
 `docker.io/library/nginx:latest` are equivalent and `GET /api/pinned`
-always returns normalized refs.
+always returns normalized refs. Pinning ("Pin Version") holds a container at
+its current version: it's never flagged for updates and is grouped into a
+separate section, but can still be updated by hand.
+
+### `GET /api/hidden`
+
+- Auth: cookie.
+- Response: `200` — array of hidden container names.
+
+### `POST /api/hide`
+
+- Auth: cookie.
+- Body: `{ "name": "string" }` — container name to hide from the dashboard.
+- Response: `200 { "ok": true }`. Idempotent.
+
+### `DELETE /api/hide/:name`
+
+- Auth: cookie.
+- Path param: `name` — container name to unhide (URL-encoded).
+- Response: `200 { "ok": true }`. Idempotent.
+
+### `GET /api/settings`
+
+- Auth: cookie.
+- Response: `200` — current settings, fully populated with defaults:
+  ```json
+  { "defaultFilter": "updates", "autoCheckOnOpen": true }
+  ```
+  - `defaultFilter` — `"updates"` or `"all"`; the view the dashboard opens in.
+  - `autoCheckOnOpen` — whether the dashboard runs a check automatically on
+    first open.
+
+### `PUT /api/settings`
+
+- Auth: cookie.
+- Body: a partial patch of the settings object, e.g. `{ "defaultFilter":
+  "all" }`. Unknown keys are ignored; invalid values for known keys return
+  `400 { "error": "invalid_value" }`.
+- Response: `200` — the full, updated settings object.
 
 ### `GET /api/health`
 
@@ -162,12 +191,15 @@ always returns normalized refs.
   "image": "nginx:latest",
   "tag": "latest",
   "currentVersion": "1.27.3",
+  "sourceUrl": "https://github.com/nginx/nginx",
   "currentDigest": "sha256:...",
   "updateAvailable": true,
   "availableDigest": "sha256:...",
   "pinned": false,
+  "hidden": false,
   "state": "running",
   "composeFile": "/opt/stacks/web/compose.yaml",
+  "composeFileMissing": false,
   "workingDir": "/opt/stacks/web"
 }
 ```
@@ -182,6 +214,9 @@ Field notes:
   the ref is digest-pinned.
 - `currentVersion` — human-readable version from the running image's
   `org.opencontainers.image.version` label, if it sets one (else `null`).
+- `sourceUrl` — source/project URL from the image's
+  `org.opencontainers.image.source` (or `.url`) label, normalized to an
+  https web URL (else `null`); used for the per-card changelog/source link.
 - `currentDigest` — digest of the image the running container was created
   from.
 - `updateAvailable` — `true` if the most recent unresolved update event
@@ -192,11 +227,16 @@ Field notes:
 - `pinned` — `true` if the image ref is in the `pinned` table ("Pin Version":
   update indicator is suppressed and the container is grouped separately, but
   a manual update is still allowed).
+- `hidden` — `true` if the container name is in the `hidden` table; the
+  dashboard omits it (restore from Settings).
 - `state` — Docker container state (`running`, `exited`, etc.).
 - `composeFile` / `workingDir` — derived from
   `com.docker.compose.project.config_files` /
   `com.docker.compose.project.working_dir` labels; used to run `docker
   compose` commands for that container.
+- `composeFileMissing` — `true` when `composeFile` is set but not present
+  inside the updater container (the same-path stacks mount is missing/wrong),
+  so a compose update would fail; the dashboard surfaces a warning banner.
 
 ## Update events
 

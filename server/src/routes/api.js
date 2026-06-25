@@ -8,11 +8,12 @@
  */
 
 import express from 'express';
-import { listContainers, stacksDirStatus } from '../docker.js';
+import { listContainers } from '../docker.js';
 import { buildContainerItems } from '../containers-service.js';
 import { normalizeRef } from '../reconcile.js';
 import { runCheck } from '../checker.js';
 import { subscribeGlobal, broadcastGlobal } from '../sse.js';
+import { getSettings, updateSettings } from '../settings.js';
 import * as db from '../db.js';
 
 export const apiRouter = express.Router();
@@ -45,6 +46,7 @@ apiRouter.get('/api/containers', async (req, res) => {
     containers,
     lookupEvent: db.latestUnresolvedEventForRef,
     isPinned: (ref) => db.isPinned(ref),
+    isHidden: (name) => db.isHidden(name),
   });
 
   for (const ref of refsToResolve) {
@@ -52,13 +54,6 @@ apiRouter.get('/api/containers', async (req, res) => {
   }
 
   return res.status(200).json(items);
-});
-
-// Lightweight config/health diagnostics for the dashboard to surface
-// actionable warnings (currently: whether the stacks dir is actually mounted
-// inside the container, without which compose-based updates fail).
-apiRouter.get('/api/diagnostics', (req, res) => {
-  return res.status(200).json({ stacks: stacksDirStatus() });
 });
 
 // Actively check registries for newer digests.
@@ -113,6 +108,7 @@ apiRouter.post('/api/pin', (req, res) => {
   }
 
   db.pin(normalized);
+  broadcastGlobal({ type: 'containers-changed' });
   return res.status(200).json({ ok: true });
 });
 
@@ -125,7 +121,49 @@ apiRouter.delete('/api/pin/:ref', (req, res) => {
   }
 
   db.unpin(normalized);
+  broadcastGlobal({ type: 'containers-changed' });
   return res.status(200).json({ ok: true });
+});
+
+// --- Hidden containers (keyed by container name) ---
+
+apiRouter.get('/api/hidden', (req, res) => {
+  return res.status(200).json(db.getHidden());
+});
+
+apiRouter.post('/api/hide', (req, res) => {
+  const name = req.body?.name;
+  if (typeof name !== 'string' || name.trim() === '') {
+    return res.status(400).json({ error: 'invalid_payload' });
+  }
+  db.hide(name.trim());
+  broadcastGlobal({ type: 'containers-changed' });
+  return res.status(200).json({ ok: true });
+});
+
+apiRouter.delete('/api/hide/:name', (req, res) => {
+  const name = decodeURIComponent(req.params.name);
+  db.unhide(name);
+  broadcastGlobal({ type: 'containers-changed' });
+  return res.status(200).json({ ok: true });
+});
+
+// --- Settings ---
+
+apiRouter.get('/api/settings', (req, res) => {
+  return res.status(200).json(getSettings());
+});
+
+apiRouter.put('/api/settings', (req, res) => {
+  try {
+    const updated = updateSettings(req.body || {});
+    return res.status(200).json(updated);
+  } catch (err) {
+    if (err.code === 'invalid_value') {
+      return res.status(400).json({ error: 'invalid_value', message: err.message });
+    }
+    throw err;
+  }
 });
 
 export default apiRouter;
