@@ -34,9 +34,13 @@ RUN apk add --no-cache docker-cli docker-cli-compose
 
 WORKDIR /app
 
-COPY --from=server-deps /app/node_modules ./node_modules
-COPY server/package*.json ./
-COPY server/src ./src
+# Mirror the repo's relative layout (server/src, client/dist) rather than
+# flattening server/src to /app/src — index.js derives the client dist path
+# from __dirname relative to its own location, and that math must match
+# between local dev (run from the repo) and this image.
+COPY --from=server-deps /app/node_modules ./server/node_modules
+COPY server/package*.json ./server/
+COPY server/src ./server/src
 COPY --from=client-builder /app/client/dist ./client/dist
 
 EXPOSE 5000
@@ -46,4 +50,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||5000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "src/index.js"]
+CMD ["node", "server/src/index.js"]
