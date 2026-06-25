@@ -10,6 +10,15 @@ function shortDigest(digest) {
   return clean.slice(0, 12);
 }
 
+// Prefer a human version (OCI version label), then the tag, then a short
+// digest as a last resort, so the card shows "1.27.3" / "latest" rather than a
+// meaningless hash.
+function displayVersion({ currentVersion, tag, currentDigest }) {
+  if (currentVersion) return currentVersion;
+  if (tag) return tag;
+  return shortDigest(currentDigest);
+}
+
 const PinIcon = ({ filled }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} aria-hidden="true">
     <path
@@ -36,8 +45,17 @@ const PinIcon = ({ filled }) => (
  *    if not needed.
  */
 export default function UpdateCard({ container, onSettled, onPinChange, registerRunner }) {
-  const { name, project, service, image, currentDigest, availableDigest, updateAvailable, pinned } =
-    container;
+  const {
+    name,
+    project,
+    service,
+    image,
+    currentDigest,
+    availableVersion,
+    availableDigest,
+    updateAvailable,
+    pinned,
+  } = container;
 
   const [pinBusy, setPinBusy] = useState(false);
   const [pinError, setPinError] = useState('');
@@ -82,15 +100,16 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
           <div className="card-name truncate" title={name}>
             {name}
           </div>
+          <div className="card-image truncate" title={image}>
+            {image}
+          </div>
           <div className="card-meta-row">
-            {(project || service) && (
+            {service && (
               <span className="pill" title={`${project || ''}/${service || ''}`}>
-                {project}
-                {project && service ? '/' : ''}
                 {service}
               </span>
             )}
-            {pinned && <span className="pill pill-pinned">Pinned</span>}
+            {pinned && <span className="pill pill-pinned">Version pinned</span>}
           </div>
         </div>
         <button
@@ -99,29 +118,28 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
           onClick={togglePin}
           disabled={pinBusy}
           aria-pressed={pinned}
-          aria-label={pinned ? 'Unpin image' : 'Pin image'}
-          title={pinned ? 'Unpin image' : 'Pin image'}
+          aria-label={pinned ? 'Unpin version' : 'Pin version (hold current)'}
+          title={pinned ? 'Unpin version' : 'Pin version (hold current)'}
         >
           <PinIcon filled={pinned} />
         </button>
       </div>
 
-      <div className="card-digests">
-        <div className="digest-row">
-          <span className="digest-label">Current</span>
-          <span className="digest-value" title={currentDigest || ''}>
-            {shortDigest(currentDigest)}
+      <div className="card-versions">
+        <div className="version-row">
+          <span className="version-label">Running</span>
+          <span className="version-value" title={currentDigest || ''}>
+            {displayVersion(container)}
           </span>
         </div>
-        <div className="digest-row">
-          <span className="digest-label">Available</span>
-          <span
-            className={`digest-value${updateAvailable ? ' is-available' : ''}`}
-            title={availableDigest || ''}
-          >
-            {updateAvailable ? shortDigest(availableDigest) : '—'}
-          </span>
-        </div>
+        {showUpdateAvailable && (
+          <div className="version-row">
+            <span className="version-label">Available</span>
+            <span className="version-value is-available" title={availableDigest || ''}>
+              {availableVersion || 'newer image'}
+            </span>
+          </div>
+        )}
       </div>
 
       {pinError && <StatusMessage type="error" message={pinError} />}

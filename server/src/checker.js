@@ -3,9 +3,8 @@
  * current digest of its tag and reconcile against what's running — recording
  * an update event when they differ, or resolving stale events when they match.
  *
- * This makes the dashboard work even if a Diun webhook was missed or never
- * fired (Diun only notifies on change). It complements, and does not replace,
- * the webhook path.
+ * This is the app's sole source of update information: it queries each image's
+ * registry directly, with no dependency on any external notifier.
  */
 
 import { listContainers } from './docker.js';

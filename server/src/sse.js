@@ -191,7 +191,7 @@ function writeToSubscribers(session, evt) {
 // --- Global event channel -------------------------------------------------
 // A lightweight broadcast channel, separate from per-update sessions, used to
 // nudge connected dashboards to refresh when something changes server-side: a
-// new Diun webhook event, a manual "check now", or a finished update.
+// manual or scheduled check, or a finished update.
 const globalClients = new Set();
 
 export function subscribeGlobal(res, req) {

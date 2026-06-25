@@ -54,6 +54,8 @@ export function buildContainerItems({ containers, lookupEvent, isPinned }) {
       project: c.project,
       service: c.service,
       image: c.image,
+      tag: c.tag ?? null,
+      currentVersion: c.currentVersion ?? null,
       currentDigest: c.currentDigest,
       updateAvailable,
       availableDigest,

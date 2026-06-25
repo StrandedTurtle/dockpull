@@ -6,7 +6,6 @@ import cookieParser from 'cookie-parser';
 import { config, assertRequiredConfig } from './config.js';
 // Importing db creates the data dir + tables as a side effect on load.
 import db from './db.js';
-import { webhookRouter } from './webhook.js';
 import { authRouter, requireAuth } from './auth.js';
 import { apiRouter } from './routes/api.js';
 import { updateRouter } from './routes/update.js';
@@ -34,20 +33,15 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// WP2/WP3: routes mounted here, in order:
-// 1. Diun webhook route (POST /api/diun/webhook) — public, its own
-//    bearer-token auth, no session cookie.
-// 2. Auth routes (POST /api/auth/login, POST /api/auth/logout, GET
+// Routes mounted here, in order:
+// 1. Auth routes (POST /api/auth/login, POST /api/auth/logout, GET
 //    /api/auth/me) — public; login/me must be reachable without a
 //    session, and logout is harmless without one.
-// 3. `requireAuth` — session-cookie gate for everything under `/api/*`
+// 2. `requireAuth` — session-cookie gate for everything under `/api/*`
 //    mounted after this point; passes through non-`/api/*` requests
 //    (static assets, SPA fallback) untouched.
-// 4. Container listing + history + pin routes (GET /api/containers, GET
-//    /api/history(/:name), GET /api/pinned, POST /api/pin, DELETE
-//    /api/pin/:ref) and update routes (POST /api/update/:name, GET
-//    /api/update/:name/stream) — now protected by `requireAuth` above.
-app.use(webhookRouter);
+// 3. Container listing + check + history + pin routes and update routes —
+//    all protected by `requireAuth` above.
 app.use(authRouter);
 app.use(requireAuth);
 app.use(apiRouter);

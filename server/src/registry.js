@@ -1,7 +1,7 @@
 /**
  * Minimal Docker Registry v2 client: resolve the current manifest digest for
  * an image tag WITHOUT pulling the image, so the app can actively check for
- * updates (independently of Diun webhooks).
+ * updates by querying registries directly.
  *
  * Supports anonymous access to registries that use the standard
  * `WWW-Authenticate: Bearer ...` token flow — Docker Hub, GHCR, lscr.io,

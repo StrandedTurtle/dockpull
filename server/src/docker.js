@@ -16,7 +16,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import Docker from 'dockerode';
 import { config } from './config.js';
-import { normalizeRef } from './reconcile.js';
+import { normalizeRef, parseRef } from './reconcile.js';
 
 // Best-effort identity of this app's own container, so listContainers can
 // exclude it (you can't safely update the updater from within itself). By
@@ -56,33 +56,21 @@ function stripLeadingSlash(rawName) {
 }
 
 /**
- * Resolves the digest the running container's image was created from, by
- * inspecting the image (by image id) and matching `RepoDigests` entries
- * against the configured image ref's repo. Returns null if no match (e.g.
- * the image was built locally and has no RepoDigests, or it was pulled
- * under a different ref than `image`).
+ * Pure: picks the digest from an image's `RepoDigests` that matches the
+ * configured image ref's repo, to disambiguate when an image was pulled/
+ * tagged under several refs. Falls back to the sole RepoDigest if there's
+ * exactly one. Returns null when there's no usable match.
  *
- * @param {string} imageIdOrName - `Image` field from container inspect.
+ * @param {string[]|undefined} repoDigests - image inspect `RepoDigests`.
  * @param {string} image - configured image ref, e.g. "nginx:latest".
- * @returns {Promise<string|null>}
+ * @returns {string|null}
  */
-async function resolveCurrentDigest(imageIdOrName, image) {
-  let imageInfo;
-  try {
-    imageInfo = await docker.getImage(imageIdOrName).inspect();
-  } catch (err) {
-    console.warn(`docker.js: failed to inspect image ${imageIdOrName}: ${err.message}`);
-    return null;
-  }
-
-  const repoDigests = imageInfo?.RepoDigests;
+function pickRepoDigest(repoDigests, image) {
   if (!Array.isArray(repoDigests) || repoDigests.length === 0) {
     return null;
   }
 
-  // Determine the repo (registry/repo, no tag) we're looking for, to
-  // disambiguate when an image has multiple RepoDigests (e.g. it was
-  // pulled/tagged under several refs).
+  // Determine the repo (registry/repo, no tag) we're looking for.
   let wantedRepo = null;
   try {
     const normalized = normalizeRef(image);
@@ -114,15 +102,51 @@ async function resolveCurrentDigest(imageIdOrName, image) {
     }
   }
 
-  // No repo match found; fall back to the first RepoDigest's digest part
-  // so we still surface *something* rather than null, but only if there's
-  // exactly one (otherwise it's ambiguous which one applies).
+  // No repo match found; fall back to the sole RepoDigest's digest part, but
+  // only if there's exactly one (otherwise it's ambiguous which applies).
   if (repoDigests.length === 1) {
     const atIdx = repoDigests[0].lastIndexOf('@');
     return atIdx === -1 ? null : repoDigests[0].slice(atIdx + 1);
   }
 
   return null;
+}
+
+/**
+ * Inspects an image once and returns both the running digest (matched to the
+ * configured ref) and the human-readable version from the
+ * `org.opencontainers.image.version` label, if the image sets it. Returns
+ * nulls if the image can't be inspected.
+ *
+ * @param {string} imageIdOrName - `Image` field from container inspect.
+ * @param {string} image - configured image ref, e.g. "nginx:latest".
+ * @returns {Promise<{ digest: string|null, version: string|null }>}
+ */
+async function inspectImageMeta(imageIdOrName, image) {
+  let imageInfo;
+  try {
+    imageInfo = await docker.getImage(imageIdOrName).inspect();
+  } catch (err) {
+    console.warn(`docker.js: failed to inspect image ${imageIdOrName}: ${err.message}`);
+    return { digest: null, version: null };
+  }
+
+  const labels = imageInfo?.Config?.Labels || {};
+  const version = labels['org.opencontainers.image.version'] || null;
+  const digest = pickRepoDigest(imageInfo?.RepoDigests, image);
+  return { digest, version };
+}
+
+/**
+ * Resolves the digest the running container's image was created from. Thin
+ * wrapper over inspectImageMeta for callers that only need the digest.
+ *
+ * @param {string} imageIdOrName - `Image` field from container inspect.
+ * @param {string} image - configured image ref, e.g. "nginx:latest".
+ * @returns {Promise<string|null>}
+ */
+async function resolveCurrentDigest(imageIdOrName, image) {
+  return (await inspectImageMeta(imageIdOrName, image)).digest;
 }
 
 /**
@@ -262,7 +286,10 @@ export async function listContainers() {
         continue;
       }
 
-      const currentDigest = await resolveCurrentDigest(inspectData.Image, image);
+      const { digest: currentDigest, version: currentVersion } = await inspectImageMeta(
+        inspectData.Image,
+        image
+      );
 
       const labels = inspectData.Config?.Labels;
       const labelInfo = composeInfoFromLabels(labels);
@@ -279,8 +306,10 @@ export async function listContainers() {
       }
 
       let normalizedRef;
+      let tag = null;
       try {
         normalizedRef = normalizeRef(image);
+        tag = parseRef(image).tag;
       } catch (err) {
         console.warn(`docker.js: failed to normalize ref "${image}" for ${name}: ${err.message}`);
         continue;
@@ -289,6 +318,8 @@ export async function listContainers() {
       results.push({
         name,
         image,
+        tag,
+        currentVersion,
         currentDigest,
         project: project || null,
         service: service || null,
@@ -422,6 +453,25 @@ export async function updateContainer(name, onLine) {
 
   if (isComposeManaged) {
     const { composeFile, workingDir, service } = composeInfo;
+
+    // The `docker compose` CLI runs inside THIS container but reads the
+    // compose file from this container's filesystem. If the stacks dir isn't
+    // mounted here at the same absolute path it has on the host, the file
+    // won't exist and compose fails with a cryptic "no such file" error.
+    // Catch it up front with an actionable message instead.
+    if (!fs.existsSync(composeFile)) {
+      return {
+        success: false,
+        message:
+          `Compose file not found at "${composeFile}" inside the updater container. ` +
+          `Mount your stacks directory at the SAME absolute path on the host and in ` +
+          `this container (e.g. "${config.STACKS_DIR}:${config.STACKS_DIR}") and set ` +
+          `STACKS_DIR to that path. See the README "same-path mount" note.`,
+        oldDigest,
+        newDigest: null,
+      };
+    }
+
     const baseArgs = ['compose', '-f', composeFile, '--project-directory', workingDir];
 
     let pullResult;
@@ -560,6 +610,24 @@ export async function updateContainer(name, onLine) {
     oldDigest,
     newDigest,
   };
+}
+
+/**
+ * Diagnostic: is the configured STACKS_DIR actually present inside this
+ * container? When false, the host stacks dir almost certainly isn't mounted
+ * (or is mounted at a different path), which breaks compose-based updates.
+ * Used by the dashboard to warn before the user hits a failed update.
+ *
+ * @returns {{ stacksDir: string, mounted: boolean }}
+ */
+export function stacksDirStatus() {
+  let mounted = false;
+  try {
+    mounted = fs.existsSync(config.STACKS_DIR) && fs.statSync(config.STACKS_DIR).isDirectory();
+  } catch {
+    mounted = false;
+  }
+  return { stacksDir: config.STACKS_DIR, mounted };
 }
 
 export { docker };
