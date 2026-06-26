@@ -1,11 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  get,
-  getPinned,
-  unpin,
-  getSettings,
-  updateSettings,
-} from '../api.js';
+import { get, getPinned, unpin, getSettings, updateSettings, testNotify } from '../api.js';
 import { useTheme } from '../hooks/useTheme.js';
 
 export default function SettingsPage() {
@@ -18,6 +12,11 @@ export default function SettingsPage() {
 
   const [settings, setSettings] = useState(null);
   const [settingsError, setSettingsError] = useState('');
+
+  const [webhookDraft, setWebhookDraft] = useState('');
+  const [webhookInit, setWebhookInit] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testStatus, setTestStatus] = useState('');
 
   const [health, setHealth] = useState(null); // null = unknown, true/false once checked
 
@@ -42,26 +41,48 @@ export default function SettingsPage() {
       .catch((err) => setSettingsError(err.message || 'Failed to load settings'));
   }, []);
 
+  // Seed the webhook input once settings arrive.
+  useEffect(() => {
+    if (settings && !webhookInit) {
+      setWebhookDraft(settings.discordWebhookUrl || '');
+      setWebhookInit(true);
+    }
+  }, [settings, webhookInit]);
+
   useEffect(() => {
     get('/health')
       .then((data) => setHealth(!!(data && data.ok)))
       .catch(() => setHealth(false));
   }, []);
 
-  const saveSetting = useCallback(
-    async (patch) => {
-      // optimistic
-      setSettings((prev) => ({ ...prev, ...patch }));
-      setSettingsError('');
-      try {
-        const updated = await updateSettings(patch);
-        setSettings(updated);
-      } catch (err) {
-        setSettingsError(err.message || 'Failed to save settings');
+  const saveSetting = useCallback(async (patch) => {
+    setSettings((prev) => ({ ...prev, ...patch })); // optimistic
+    setSettingsError('');
+    try {
+      const updated = await updateSettings(patch);
+      setSettings(updated);
+      return updated;
+    } catch (err) {
+      setSettingsError(err.message || 'Failed to save settings');
+      throw err;
+    }
+  }, []);
+
+  const runTest = useCallback(async () => {
+    setTesting(true);
+    setTestStatus('');
+    try {
+      if (settings && webhookDraft !== settings.discordWebhookUrl) {
+        await saveSetting({ discordWebhookUrl: webhookDraft });
       }
-    },
-    []
-  );
+      await testNotify(webhookDraft || undefined);
+      setTestStatus('Sent — check your Discord channel.');
+    } catch (err) {
+      setTestStatus(err.message || 'Test failed');
+    } finally {
+      setTesting(false);
+    }
+  }, [webhookDraft, settings, saveSetting]);
 
   const handleUnpin = useCallback(
     async (ref) => {
@@ -120,7 +141,7 @@ export default function SettingsPage() {
             <button
               type="button"
               className={`chip${settings?.defaultFilter !== 'all' ? ' is-active' : ''}`}
-              onClick={() => saveSetting({ defaultFilter: 'updates' })}
+              onClick={() => saveSetting({ defaultFilter: 'updates' }).catch(() => {})}
               disabled={!settings}
             >
               Updates only
@@ -128,7 +149,7 @@ export default function SettingsPage() {
             <button
               type="button"
               className={`chip${settings?.defaultFilter === 'all' ? ' is-active' : ''}`}
-              onClick={() => saveSetting({ defaultFilter: 'all' })}
+              onClick={() => saveSetting({ defaultFilter: 'all' }).catch(() => {})}
               disabled={!settings}
             >
               All
@@ -148,7 +169,7 @@ export default function SettingsPage() {
             role="switch"
             aria-checked={!!settings?.autoCheckOnOpen}
             aria-label="Toggle check on open"
-            onClick={() => saveSetting({ autoCheckOnOpen: !settings?.autoCheckOnOpen })}
+            onClick={() => saveSetting({ autoCheckOnOpen: !settings?.autoCheckOnOpen }).catch(() => {})}
             disabled={!settings}
           >
             <span className="theme-switch-track">
@@ -156,6 +177,107 @@ export default function SettingsPage() {
             </span>
             <span className="theme-switch-text">{settings?.autoCheckOnOpen ? 'On' : 'Off'}</span>
           </button>
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <h3>Background checks &amp; Discord</h3>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Background checks</span>
+            <span className="settings-row-desc">
+              Periodically check for updates even when the app is closed.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="theme-switch"
+            role="switch"
+            aria-checked={!!settings?.backgroundCheckEnabled}
+            aria-label="Toggle background checks"
+            onClick={() =>
+              saveSetting({ backgroundCheckEnabled: !settings?.backgroundCheckEnabled }).catch(() => {})
+            }
+            disabled={!settings}
+          >
+            <span className="theme-switch-track">
+              <span className="theme-switch-thumb" />
+            </span>
+            <span className="theme-switch-text">{settings?.backgroundCheckEnabled ? 'On' : 'Off'}</span>
+          </button>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Check every</span>
+            <span className="settings-row-desc">How often the background check runs.</span>
+          </div>
+          <select
+            className="settings-select"
+            value={settings?.backgroundCheckIntervalHours ?? 6}
+            onChange={(e) =>
+              saveSetting({ backgroundCheckIntervalHours: Number(e.target.value) }).catch(() => {})
+            }
+            disabled={!settings || !settings?.backgroundCheckEnabled}
+          >
+            <option value={1}>1 hour</option>
+            <option value={3}>3 hours</option>
+            <option value={6}>6 hours</option>
+            <option value={12}>12 hours</option>
+            <option value={24}>24 hours</option>
+          </select>
+        </div>
+        <div className="settings-row settings-row-stack">
+          <div className="settings-row-label">
+            <span>Discord webhook URL</span>
+            <span className="settings-row-desc">
+              Get pinged when updates are found. Paste a Discord channel webhook URL.
+            </span>
+          </div>
+          <input
+            type="url"
+            className="settings-input"
+            placeholder="https://discord.com/api/webhooks/…"
+            value={webhookDraft}
+            onChange={(e) => setWebhookDraft(e.target.value)}
+            onBlur={() => {
+              if (settings && webhookDraft !== settings.discordWebhookUrl) {
+                saveSetting({ discordWebhookUrl: webhookDraft }).catch(() => {});
+              }
+            }}
+            disabled={!settings}
+          />
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Send notifications</span>
+            <span className="settings-row-desc">Enable Discord notifications for background checks.</span>
+          </div>
+          <button
+            type="button"
+            className="theme-switch"
+            role="switch"
+            aria-checked={!!settings?.discordEnabled}
+            aria-label="Toggle Discord notifications"
+            onClick={() => saveSetting({ discordEnabled: !settings?.discordEnabled }).catch(() => {})}
+            disabled={!settings}
+          >
+            <span className="theme-switch-track">
+              <span className="theme-switch-thumb" />
+            </span>
+            <span className="theme-switch-text">{settings?.discordEnabled ? 'On' : 'Off'}</span>
+          </button>
+        </div>
+        <div className="settings-row">
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={runTest}
+            disabled={testing || !webhookDraft}
+          >
+            {testing && <span className="spinner" aria-hidden="true" />}
+            Send test message
+          </button>
+          {testStatus && <span className="settings-test-status">{testStatus}</span>}
         </div>
       </section>
 

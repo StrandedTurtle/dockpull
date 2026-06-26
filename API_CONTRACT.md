@@ -145,19 +145,41 @@ separate section, but can still be updated by hand.
 - Auth: cookie.
 - Response: `200` — current settings, fully populated with defaults:
   ```json
-  { "defaultFilter": "updates", "autoCheckOnOpen": true }
+  {
+    "defaultFilter": "updates",
+    "autoCheckOnOpen": true,
+    "backgroundCheckEnabled": true,
+    "backgroundCheckIntervalHours": 6,
+    "discordEnabled": false,
+    "discordWebhookUrl": ""
+  }
   ```
   - `defaultFilter` — `"updates"` or `"all"`; the view the dashboard opens in.
   - `autoCheckOnOpen` — whether the dashboard runs a check automatically on
     first open.
+  - `backgroundCheckEnabled` — whether the server runs a scheduled check.
+  - `backgroundCheckIntervalHours` — interval for that check (1–168).
+  - `discordEnabled` — whether to send Discord notifications on new updates.
+  - `discordWebhookUrl` — Discord (or compatible) webhook URL, or `""`.
 
 ### `PUT /api/settings`
 
 - Auth: cookie.
 - Body: a partial patch of the settings object, e.g. `{ "defaultFilter":
   "all" }`. Unknown keys are ignored; invalid values for known keys return
-  `400 { "error": "invalid_value" }`.
+  `400 { "error": "invalid_value" }`. Changing the interval/enable re-arms the
+  background scheduler immediately.
 - Response: `200` — the full, updated settings object.
+
+### `POST /api/notify/test`
+
+- Auth: cookie.
+- Body: `{ "url": "string" }` (optional) — a webhook URL to test; falls back to
+  the configured `discordWebhookUrl`.
+- Sends a one-off test message to the webhook.
+- Response: `200 { "ok": true }` on success; `400 { "error": "no_webhook" }` if
+  no URL is configured; `502 { "error": "webhook_failed" }` if the webhook
+  rejected the message.
 
 ### `GET /api/health`
 

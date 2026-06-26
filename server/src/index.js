@@ -9,6 +9,7 @@ import db from './db.js';
 import { authRouter, requireAuth } from './auth.js';
 import { apiRouter } from './routes/api.js';
 import { updateRouter } from './routes/update.js';
+import scheduler from './scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -65,6 +66,9 @@ const server = app.listen(config.PORT, () => {
   console.log(`Diun Updater server listening at ${config.BASE_URL} (port ${config.PORT})`);
 });
 
+// Background update checker (interval + Discord notify per settings).
+scheduler.start();
+
 // Graceful shutdown: stop accepting connections and checkpoint/close SQLite
 // so a `docker stop` doesn't leave the WAL or an in-flight write half-done.
 let shuttingDown = false;
@@ -72,6 +76,7 @@ function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`Received ${signal}, shutting down…`);
+  scheduler.stop();
   server.close(() => {
     try {
       db.close();
