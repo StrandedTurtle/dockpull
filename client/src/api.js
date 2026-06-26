@@ -121,4 +121,8 @@ export function updateSettings(patch) {
   return request('PUT', '/settings', patch);
 }
 
+export function testNotify(url) {
+  return post('/notify/test', url ? { url } : {});
+}
+
 export { ApiError };

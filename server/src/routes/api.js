@@ -14,6 +14,8 @@ import { normalizeRef } from '../reconcile.js';
 import { runCheck } from '../checker.js';
 import { subscribeGlobal, broadcastGlobal } from '../sse.js';
 import { getSettings, updateSettings } from '../settings.js';
+import scheduler from '../scheduler.js';
+import { sendDiscordTest } from '../notify.js';
 import * as db from '../db.js';
 
 export const apiRouter = express.Router();
@@ -133,12 +135,29 @@ apiRouter.get('/api/settings', (req, res) => {
 apiRouter.put('/api/settings', (req, res) => {
   try {
     const updated = updateSettings(req.body || {});
+    scheduler.reschedule();
     return res.status(200).json(updated);
   } catch (err) {
     if (err.code === 'invalid_value') {
       return res.status(400).json({ error: 'invalid_value', message: err.message });
     }
     throw err;
+  }
+});
+
+// Send a test Discord message to the configured (or supplied) webhook URL.
+apiRouter.post('/api/notify/test', async (req, res) => {
+  const url =
+    (typeof req.body?.url === 'string' && req.body.url.trim()) || getSettings().discordWebhookUrl;
+  if (!url) {
+    return res.status(400).json({ error: 'no_webhook', message: 'No Discord webhook URL configured.' });
+  }
+  try {
+    const result = await sendDiscordTest(url);
+    if (result.ok) return res.status(200).json({ ok: true });
+    return res.status(502).json({ error: 'webhook_failed', status: result.status });
+  } catch (err) {
+    return res.status(502).json({ error: 'webhook_failed', message: err.message });
   }
 });
 

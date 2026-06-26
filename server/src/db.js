@@ -44,6 +44,14 @@ CREATE INDEX IF NOT EXISTS idx_events_ref ON update_events(normalized_ref, resol
 CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC);
 `);
 
+// Migration: add `notified` to update_events (dedupe Discord notifications).
+{
+  const cols = db.prepare('PRAGMA table_info(update_events)').all().map((col) => col.name);
+  if (!cols.includes('notified')) {
+    db.exec('ALTER TABLE update_events ADD COLUMN notified INTEGER DEFAULT 0');
+  }
+}
+
 const stmts = {
   recordEvent: db.prepare(`
     INSERT INTO update_events (image, normalized_ref, status, digest, raw_json)
@@ -95,6 +103,12 @@ const stmts = {
   setSetting: db.prepare(`
     INSERT INTO settings (key, value) VALUES (@key, @value)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `),
+  getUnnotifiedRefs: db.prepare(`
+    SELECT DISTINCT normalized_ref FROM update_events WHERE resolved = 0 AND notified = 0
+  `),
+  markRefNotified: db.prepare(`
+    UPDATE update_events SET notified = 1 WHERE resolved = 0 AND normalized_ref = ?
   `),
 };
 
@@ -165,6 +179,18 @@ export function getAllSettings() {
 
 export function setSetting(key, value) {
   return stmts.setSetting.run({ key, value: value == null ? null : String(value) });
+}
+
+export function getUnnotifiedRefs() {
+  return stmts.getUnnotifiedRefs.all().map((r) => r.normalized_ref);
+}
+
+const markRefsNotifiedTxn = db.transaction((refs) => {
+  for (const ref of refs) stmts.markRefNotified.run(ref);
+});
+
+export function markRefsNotified(refs) {
+  if (Array.isArray(refs) && refs.length) markRefsNotifiedTxn(refs);
 }
 
 export default db;

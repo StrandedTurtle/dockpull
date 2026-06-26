@@ -12,14 +12,21 @@ process.env.DATA_DIR = tmp;
 const { getSettings, updateSettings } = await import('../src/settings.js');
 
 test('settings: defaults when nothing stored', () => {
-  assert.deepEqual(getSettings(), { defaultFilter: 'updates', autoCheckOnOpen: true });
+  assert.deepEqual(getSettings(), {
+    defaultFilter: 'updates',
+    autoCheckOnOpen: true,
+    backgroundCheckEnabled: true,
+    backgroundCheckIntervalHours: 6,
+    discordEnabled: false,
+    discordWebhookUrl: '',
+  });
 });
 
-test('settings: updateSettings persists and coerces booleans', () => {
+test('settings: persists and coerces booleans/filter', () => {
   const s = updateSettings({ defaultFilter: 'all', autoCheckOnOpen: false });
   assert.equal(s.defaultFilter, 'all');
   assert.equal(s.autoCheckOnOpen, false);
-  assert.deepEqual(getSettings(), { defaultFilter: 'all', autoCheckOnOpen: false });
+  assert.equal(getSettings().defaultFilter, 'all');
 });
 
 test('settings: rejects invalid known values', () => {
@@ -30,3 +37,15 @@ test('settings: ignores unknown keys', () => {
   assert.doesNotThrow(() => updateSettings({ somethingUnknown: 'x' }));
 });
 
+test('settings: interval bounds enforced', () => {
+  assert.equal(updateSettings({ backgroundCheckIntervalHours: 12 }).backgroundCheckIntervalHours, 12);
+  assert.throws(() => updateSettings({ backgroundCheckIntervalHours: 0 }), /invalid value/);
+  assert.throws(() => updateSettings({ backgroundCheckIntervalHours: 999 }), /invalid value/);
+});
+
+test('settings: webhook url validated, empty allowed', () => {
+  const s = updateSettings({ discordWebhookUrl: 'https://discord.com/api/webhooks/1/abc' });
+  assert.equal(s.discordWebhookUrl, 'https://discord.com/api/webhooks/1/abc');
+  assert.throws(() => updateSettings({ discordWebhookUrl: 'not-a-url' }), /invalid value/);
+  assert.equal(updateSettings({ discordWebhookUrl: '' }).discordWebhookUrl, '');
+});

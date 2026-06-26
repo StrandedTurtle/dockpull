@@ -1,11 +1,12 @@
 /**
  * App settings: a small typed layer over the key/value `settings` table.
  *
- * Each setting declares a default and a coercion from the stored string. New
- * settings (e.g. the background scheduler / Discord webhook in a later phase)
- * just get added to SPEC. `getSettings()` always returns a fully-populated,
- * typed object (defaults merged over stored values); `updateSettings()` takes
- * a partial patch, validates known keys, and persists them.
+ * Each setting declares a default and coercions from the stored string and
+ * from a client-supplied input. `getSettings()` always returns a fully
+ * populated, typed object (defaults merged over stored values);
+ * `updateSettings()` takes a partial patch, validates known keys, and persists
+ * them. Defaults can be seeded from env vars so ops can configure via the
+ * environment, with the Settings UI overriding at runtime.
  */
 
 import * as db from './db.js';
@@ -20,21 +21,67 @@ function enumOf(allowed, fallback) {
   return (v) => (allowed.includes(v) ? v : fallback);
 }
 
+function intInOrUndef(min, max) {
+  return (v) => {
+    const n = typeof v === 'number' ? v : parseInt(v, 10);
+    if (!Number.isFinite(n) || n < min || n > max) return undefined;
+    return Math.trunc(n);
+  };
+}
+
+function urlOrUndef(v) {
+  if (v === '') return '';
+  if (typeof v === 'string' && /^https?:\/\//i.test(v.trim())) return v.trim();
+  return undefined;
+}
+
+// --- env-seeded defaults ---
+const ENV_WEBHOOK = process.env.DISCORD_WEBHOOK_URL || '';
+const ENV_INTERVAL = intInOrUndef(1, 168)(process.env.CHECK_INTERVAL_HOURS) ?? 6;
+const ENV_BG_ENABLED = bool(process.env.BACKGROUND_CHECK_ENABLED, true);
+
 const SPEC = {
   defaultFilter: {
     default: 'updates',
     fromStore: enumOf(['updates', 'all'], 'updates'),
-    fromInput: enumOf(['updates', 'all'], undefined), // undefined -> rejected
+    fromInput: enumOf(['updates', 'all'], undefined),
   },
   autoCheckOnOpen: {
     default: true,
     fromStore: (v) => bool(v, true),
     fromInput: (v) => (typeof v === 'boolean' ? v : undefined),
   },
+  backgroundCheckEnabled: {
+    default: ENV_BG_ENABLED,
+    fromStore: (v) => bool(v, ENV_BG_ENABLED),
+    fromInput: (v) => (typeof v === 'boolean' ? v : undefined),
+  },
+  backgroundCheckIntervalHours: {
+    default: ENV_INTERVAL,
+    fromStore: (v) => intInOrUndef(1, 168)(v) ?? ENV_INTERVAL,
+    fromInput: intInOrUndef(1, 168),
+  },
+  discordEnabled: {
+    default: ENV_WEBHOOK !== '',
+    fromStore: (v) => bool(v, ENV_WEBHOOK !== ''),
+    fromInput: (v) => (typeof v === 'boolean' ? v : undefined),
+  },
+  discordWebhookUrl: {
+    default: ENV_WEBHOOK,
+    fromStore: (v) => (typeof v === 'string' ? v : ENV_WEBHOOK),
+    fromInput: urlOrUndef,
+  },
 };
 
 /**
- * @returns {{ defaultFilter: 'updates'|'all', autoCheckOnOpen: boolean }}
+ * @returns {{
+ *   defaultFilter: 'updates'|'all',
+ *   autoCheckOnOpen: boolean,
+ *   backgroundCheckEnabled: boolean,
+ *   backgroundCheckIntervalHours: number,
+ *   discordEnabled: boolean,
+ *   discordWebhookUrl: string,
+ * }}
  */
 export function getSettings() {
   const stored = db.getAllSettings();
@@ -51,7 +98,7 @@ export function getSettings() {
  * feedback). Returns the full, updated settings object.
  *
  * @param {Record<string, unknown>} patch
- * @returns {{ defaultFilter: string, autoCheckOnOpen: boolean }}
+ * @returns {object} the full, updated settings
  * @throws {Error} with `.code = 'invalid_value'` on a bad known value.
  */
 export function updateSettings(patch) {
@@ -69,7 +116,7 @@ export function updateSettings(patch) {
       err.code = 'invalid_value';
       throw err;
     }
-    db.setSetting(key, typeof coerced === 'boolean' ? (coerced ? '1' : '0') : coerced);
+    db.setSetting(key, typeof coerced === 'boolean' ? (coerced ? '1' : '0') : String(coerced));
   }
   return getSettings();
 }

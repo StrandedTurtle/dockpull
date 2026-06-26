@@ -296,6 +296,21 @@ over the standard token flow — Docker Hub, GHCR, lscr.io, quay.io, etc. for
 public images. Private images that require credentials are skipped (counted
 under `errors`).
 
+### Background checks & Discord notifications
+
+By default the server also checks on a schedule (every 6h) so badges stay fresh
+even when the app is closed. Configure it under **Settings → Background checks &
+Discord**:
+
+- **Background checks** on/off and interval.
+- **Discord webhook URL** — paste a Discord channel webhook to get a message when
+  updates are found, then use **Send test message** to verify it. Each update is
+  announced once (no repeats on every check).
+
+These can also be seeded from the environment (`BACKGROUND_CHECK_ENABLED`,
+`CHECK_INTERVAL_HOURS`, `DISCORD_WEBHOOK_URL`); the Settings UI overrides at
+runtime.
+
 ---
 
 ## Configuration reference
@@ -312,6 +327,9 @@ All configuration is via environment variables (see `.env.example`).
 | `DATA_DIR` | `/data` | | SQLite (`app.db`) location; persist via a volume. |
 | `SESSION_TTL` | `604800` | | Login cookie lifetime in seconds (7 days). |
 | `BASE_URL` | `http://localhost:5000` | | Public URL; if `https`, the cookie is set `Secure`. |
+| `DISCORD_WEBHOOK_URL` | — | | Discord webhook for update notifications (optional; also set in Settings). |
+| `CHECK_INTERVAL_HOURS` | `6` | | Background check interval in hours (1–168). |
+| `BACKGROUND_CHECK_ENABLED` | `true` | | Whether the scheduled background check runs. |
 | `SELF_CONTAINER_NAME` | `diun-updater` | | This app's own container name, excluded from the dashboard so it can't update itself. |
 
 The two required vars are enforced at startup — the server refuses to boot
