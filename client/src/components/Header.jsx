@@ -66,7 +66,7 @@ export default function Header({ pendingCount = 0, onLoggedOut }) {
   return (
     <header className="app-header">
       <Link to="/" className="title-link">
-        <span>Diun Updater</span>
+        <span>DockPull</span>
         {pendingCount > 0 && <span className="badge">{pendingCount}</span>}
       </Link>
       <nav className="header-nav" aria-label="Primary">

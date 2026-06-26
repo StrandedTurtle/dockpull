@@ -86,7 +86,7 @@ async function fetchGitHubReleases(owner, repo, timeoutMs = 10000) {
   const res = await fetch(url, {
     headers: {
       Accept: 'application/vnd.github+json',
-      'User-Agent': 'diun-updater',
+      'User-Agent': 'dockpull',
     },
     signal: AbortSignal.timeout(timeoutMs),
   });

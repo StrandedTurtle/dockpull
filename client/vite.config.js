@@ -8,7 +8,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'Diun Updater',
+        name: 'DockPull',
         short_name: 'Updater',
         theme_color: '#0f1117',
         background_color: '#0f1117',

@@ -1,6 +1,6 @@
 /**
  * Pure reconciliation merge: combines docker.js's listContainers() output
- * with the latest unresolved Diun event (per normalized ref) and pin state
+ * with the latest unresolved update event (per normalized ref) and pin state
  * to produce the API item shape documented in API_CONTRACT.md under
  * "/api/containers item shape".
  *

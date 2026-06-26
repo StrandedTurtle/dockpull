@@ -4,7 +4,7 @@ import UpdateCard from './components/UpdateCard.jsx';
 import UpdateAllButton from './components/UpdateAllButton.jsx';
 import StackGroup from './components/StackGroup.jsx';
 
-const AUTOCHECK_SESSION = 'diun.autochecked';
+const AUTOCHECK_SESSION = 'dockpull.autochecked';
 const UNGROUPED = 'Ungrouped';
 
 function hasUpdate(c) {

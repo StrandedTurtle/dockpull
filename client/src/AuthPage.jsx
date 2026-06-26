@@ -28,7 +28,7 @@ export default function AuthPage({ onAuthed }) {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1>Diun Updater</h1>
+        <h1>DockPull</h1>
         <p className="subtitle">Sign in to manage your containers</p>
         <form onSubmit={handleSubmit}>
           <div className="field">

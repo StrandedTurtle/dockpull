@@ -21,7 +21,7 @@ export const config = {
   // Name of this app's own container, excluded from the dashboard so it
   // can't try to update (and kill) itself. Defaults to the container_name
   // used in the shipped docker-compose.yml; override if you rename it.
-  SELF_CONTAINER_NAME: process.env.SELF_CONTAINER_NAME || 'diun-updater',
+  SELF_CONTAINER_NAME: process.env.SELF_CONTAINER_NAME || 'dockpull',
 };
 
 /**

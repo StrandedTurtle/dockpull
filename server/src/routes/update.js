@@ -40,10 +40,10 @@ async function runUpdate(name, image) {
       status: result.success ? 'success' : 'failure',
       message: result.message,
     });
-    // On success, clear any pending Diun event for this image so the
+    // On success, clear any pending update event for this image so the
     // dashboard indicator goes away — we just pulled the latest. Relying on
     // the digest-equality check in /api/containers alone is not enough:
-    // Diun often reports a manifest-list (multi-arch) digest while the
+    // A registry can report a manifest-list (multi-arch) digest while the
     // container's RepoDigest is platform-specific, so they'd never match and
     // the badge would stick forever.
     if (result.success && image) {

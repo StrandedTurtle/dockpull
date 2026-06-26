@@ -26,7 +26,7 @@ const Chevron = ({ open }) => (
  *  - children: the cards
  */
 export default function StackGroup({ title, count, updateCount = 0, storageKey, defaultOpen = true, children }) {
-  const key = `diun.group.${storageKey}`;
+  const key = `dockpull.group.${storageKey}`;
   const [open, setOpen] = useState(() => {
     try {
       const stored = localStorage.getItem(key);

@@ -1,9 +1,9 @@
 services:
-  diun-updater:
+  dockpull:
     build:
       context: .
       dockerfile: server/Dockerfile
-    container_name: diun-updater
+    container_name: dockpull
     restart: unless-stopped
     ports:
       - "5000:5000"
@@ -28,10 +28,10 @@ services:
       # STACKS_DIR=/opt/stacks in your .env and keep this mapping as-is.
       - ${STACKS_DIR}:${STACKS_DIR}
       # Persistent SQLite database (events, update history, pinned refs).
-      - diun-updater-data:/data
+      - dockpull-data:/data
 
 volumes:
-  diun-updater-data:
+  dockpull-data:
 
 # ---------------------------------------------------------------------------
 # No external notifier needed. This app checks your images' registries for

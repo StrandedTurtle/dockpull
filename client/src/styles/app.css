@@ -1271,3 +1271,8 @@ a {
   max-height: 240px;
   overflow-y: auto;
 }
+
+.settings-time {
+  width: auto;
+  min-width: 120px;
+}

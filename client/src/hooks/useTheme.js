@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-const STORAGE_KEY = 'diun-theme';
+const STORAGE_KEY = 'dockpull-theme';
 
 function getInitialTheme() {
   if (typeof window === 'undefined') return 'dark';
@@ -49,7 +49,7 @@ function setTheme(theme) {
 
 /**
  * Returns `{ theme, toggle }`. `theme` is 'dark' | 'light', read from
- * localStorage('diun-theme') or `prefers-color-scheme` on first use.
+ * localStorage('dockpull-theme') or `prefers-color-scheme` on first use.
  * `toggle()` flips the theme, persists it, and sets `data-theme` on
  * `<html>` (which is all styles/themes.css needs to re-theme everything).
  */

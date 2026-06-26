@@ -10,10 +10,10 @@ All request/response bodies are JSON unless noted otherwise.
 - Auth is a single shared password (`ADMIN_PASSWORD`), compared in constant
   time, no user accounts/database.
 - On successful login, the server sets a signed, httpOnly cookie named
-  `diun_session` (`SameSite=Lax`, `Secure` when served over HTTPS,
+  `dockpull_session` (`SameSite=Lax`, `Secure` when served over HTTPS,
   `Max-Age` = `SESSION_TTL` seconds).
 - Protected routes (everything except `/api/auth/login` and `/api/health`)
-  require a valid `diun_session` cookie. If it is missing, invalid, or
+  require a valid `dockpull_session` cookie. If it is missing, invalid, or
   expired, the server responds `401 Unauthorized` with
   `{ "error": "unauthorized" }`.
 
@@ -24,7 +24,7 @@ All request/response bodies are JSON unless noted otherwise.
 - Auth: none.
 - Body: `{ "password": "string" }`
 - Response:
-  - `200 { "ok": true }` + `Set-Cookie: diun_session=...` on success.
+  - `200 { "ok": true }` + `Set-Cookie: dockpull_session=...` on success.
   - `401 { "error": "invalid_password" }` on bad password.
   - `429 { "error": "too_many_attempts" }` after too many failed attempts
     from one client IP (temporary lockout).
@@ -33,7 +33,7 @@ All request/response bodies are JSON unless noted otherwise.
 
 - Auth: cookie.
 - Body: none.
-- Response: `200 { "ok": true }`, clears the `diun_session` cookie.
+- Response: `200 { "ok": true }`, clears the `dockpull_session` cookie.
 
 ### `GET /api/auth/me`
 
@@ -63,7 +63,7 @@ All request/response bodies are JSON unless noted otherwise.
 - Auth: cookie.
 - Response: `text/event-stream` (SSE). Emits
   `data: {"type":"containers-changed"}` whenever server state changes (a check
-  ran, an update finished, or a pin/hide changed) so dashboards can refresh
+  ran, an update finished, or a pin changed) so dashboards can refresh
   without a manual reload. Comment lines (`: ...`) are sent as keepalives.
 
 ### `POST /api/update/:name`
@@ -149,7 +149,7 @@ separate section, but can still be updated by hand.
     "defaultFilter": "updates",
     "autoCheckOnOpen": true,
     "backgroundCheckEnabled": true,
-    "backgroundCheckIntervalHours": 6,
+    "scheduledCheckTime": "09:00",
     "discordEnabled": false,
     "discordWebhookUrl": ""
   }
@@ -158,7 +158,7 @@ separate section, but can still be updated by hand.
   - `autoCheckOnOpen` — whether the dashboard runs a check automatically on
     first open.
   - `backgroundCheckEnabled` — whether the server runs a scheduled check.
-  - `backgroundCheckIntervalHours` — interval for that check (1–168).
+  - `scheduledCheckTime` — daily local time (HH:MM) for the scheduled scan.
   - `discordEnabled` — whether to send Discord notifications on new updates.
   - `discordWebhookUrl` — Discord (or compatible) webhook URL, or `""`.
 
@@ -167,7 +167,7 @@ separate section, but can still be updated by hand.
 - Auth: cookie.
 - Body: a partial patch of the settings object, e.g. `{ "defaultFilter":
   "all" }`. Unknown keys are ignored; invalid values for known keys return
-  `400 { "error": "invalid_value" }`. Changing the interval/enable re-arms the
+  `400 { "error": "invalid_value" }`. Changing the time/enable re-arms the
   background scheduler immediately.
 - Response: `200` — the full, updated settings object.
 
