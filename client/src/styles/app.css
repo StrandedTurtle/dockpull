@@ -1213,3 +1213,61 @@ a {
   font-size: 0.82rem;
   color: var(--color-text-muted);
 }
+
+/* ---------- Changelog panel (Phase 4) ---------- */
+
+.changelog-panel {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.changelog-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.changelog-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.changelog-releases {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.changelog-release-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.changelog-date {
+  flex-shrink: 0;
+  font-weight: 500;
+  font-size: 0.75rem;
+  color: var(--color-text-faint);
+}
+
+.changelog-body {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+  max-height: 240px;
+  overflow-y: auto;
+}

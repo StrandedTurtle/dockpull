@@ -1,0 +1,138 @@
+/**
+ * Best-effort changelog resolver. Given an image's source label + current
+ * version, fetch GitHub release notes newer than what's running, or fall back
+ * to a "where to look" link (the source URL, Docker Hub tags, GHCR repo).
+ *
+ * The parsing/selection helpers are pure (unit-tested); only fetchGitHubReleases
+ * touches the network.
+ */
+
+import { parseRef } from './reconcile.js';
+
+/**
+ * Extract {owner, repo} from a GitHub URL, or null.
+ * @param {string|null} sourceUrl
+ * @returns {{owner: string, repo: string}|null}
+ */
+export function parseGitHubRepo(sourceUrl) {
+  if (typeof sourceUrl !== 'string') return null;
+  const m = sourceUrl.match(/github\.com[/:]([^/]+)\/([^/#?]+)/i);
+  if (!m) return null;
+  const owner = m[1];
+  const repo = m[2].replace(/\.git$/i, '');
+  if (!owner || !repo) return null;
+  return { owner, repo };
+}
+
+function normalizeVer(v) {
+  return String(v || '').trim().replace(/^v/i, '');
+}
+
+function truncate(s, n) {
+  if (typeof s !== 'string') return '';
+  return s.length > n ? `${s.slice(0, n)}…` : s;
+}
+
+/**
+ * From a newest-first list of releases, pick those newer than currentVersion.
+ * Heuristic: walk from newest until we hit the release matching the running
+ * version; if we never match, show the most recent few. Pure + testable.
+ *
+ * @param {Array<{tag_name?: string, name?: string}>} releases
+ * @param {string|null} currentVersion
+ * @returns {Array<object>}
+ */
+export function selectNewerReleases(releases, currentVersion) {
+  if (!Array.isArray(releases)) return [];
+  if (!currentVersion) return releases.slice(0, 5);
+  const cur = normalizeVer(currentVersion);
+  const out = [];
+  for (const r of releases) {
+    const tag = normalizeVer(r.tag_name || r.name || '');
+    if (tag && tag === cur) break; // reached the running version
+    out.push(r);
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+/**
+ * Best-effort "where to look" link for an image with no GitHub source label.
+ * @param {string} image
+ * @returns {{url: string, label: string}|null}
+ */
+export function buildRegistryLink(image) {
+  let parsed;
+  try {
+    parsed = parseRef(image);
+  } catch {
+    return null;
+  }
+  const { registry, repository } = parsed;
+  if (registry === 'docker.io') {
+    if (repository.startsWith('library/')) {
+      return { url: `https://hub.docker.com/_/${repository.slice('library/'.length)}`, label: 'Docker Hub' };
+    }
+    return { url: `https://hub.docker.com/r/${repository}/tags`, label: 'Docker Hub' };
+  }
+  if (registry === 'ghcr.io') {
+    return { url: `https://github.com/${repository}`, label: 'GitHub' };
+  }
+  return null;
+}
+
+async function fetchGitHubReleases(owner, repo, timeoutMs = 10000) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/releases?per_page=30`;
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'diun-updater',
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Resolve a changelog payload for a container's image.
+ *
+ * @param {{ image: string, sourceUrl: string|null, currentVersion: string|null }} meta
+ * @returns {Promise<object>}
+ */
+export async function getChangelog({ image, sourceUrl, currentVersion }) {
+  const gh = parseGitHubRepo(sourceUrl);
+  if (gh) {
+    const releasesUrl = `https://github.com/${gh.owner}/${gh.repo}/releases`;
+    try {
+      const releases = await fetchGitHubReleases(gh.owner, gh.repo);
+      const selected = selectNewerReleases(releases, currentVersion);
+      return {
+        type: 'github',
+        repoUrl: `https://github.com/${gh.owner}/${gh.repo}`,
+        releasesUrl,
+        currentVersion: currentVersion || null,
+        releases: selected.map((r) => ({
+          tag: r.tag_name || r.name || '',
+          name: r.name || r.tag_name || '',
+          url: r.html_url,
+          publishedAt: r.published_at,
+          body: truncate(r.body || '', 1500),
+        })),
+      };
+    } catch (err) {
+      return {
+        type: 'link',
+        url: releasesUrl,
+        label: 'Releases',
+        note: `Couldn't fetch release notes (${err.message}).`,
+      };
+    }
+  }
+  if (sourceUrl) return { type: 'link', url: sourceUrl, label: 'Source' };
+  const reg = buildRegistryLink(image);
+  if (reg) return { type: 'link', url: reg.url, label: reg.label };
+  return { type: 'none' };
+}
+
+export default { parseGitHubRepo, selectNewerReleases, buildRegistryLink, getChangelog };
