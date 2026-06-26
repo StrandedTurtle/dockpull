@@ -163,8 +163,8 @@ export default function Dashboard({ onPendingCountChange }) {
     });
   }, []);
 
-  // Visible = not hidden. Pinned go to their own bottom section.
-  const visible = useMemo(() => containers.filter((c) => !c.hidden), [containers]);
+  // Pinned go to their own bottom section; everything else is the main list.
+  const visible = containers;
   const pinnedItems = useMemo(
     () => visible.filter((c) => c.pinned).sort((a, b) => a.name.localeCompare(b.name)),
     [visible]
@@ -324,7 +324,6 @@ export default function Dashboard({ onPendingCountChange }) {
                     container={container}
                     onSettled={handleSettled}
                     onPinChange={load}
-                    onHidden={load}
                     registerRunner={registerRunner}
                   />
                 ))}
@@ -349,7 +348,6 @@ export default function Dashboard({ onPendingCountChange }) {
                   container={container}
                   onSettled={handleSettled}
                   onPinChange={load}
-                  onHidden={load}
                   registerRunner={registerRunner}
                 />
               ))}

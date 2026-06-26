@@ -89,7 +89,6 @@ describe('buildContainerItems', () => {
       updateAvailable: false,
       availableDigest: null,
       pinned: false,
-      hidden: false,
       state: 'running',
       composeFile: '/stacks/web/docker-compose.yml',
       composeFileMissing: false,
@@ -97,16 +96,6 @@ describe('buildContainerItems', () => {
     });
   });
 
-  test('isHidden marks the item hidden', () => {
-    const containers = [makeContainer()];
-    const { items } = buildContainerItems({
-      containers,
-      lookupEvent: () => undefined,
-      isPinned: () => false,
-      isHidden: (name) => name === 'nginx',
-    });
-    assert.equal(items[0].hidden, true);
-  });
 
   test('handles multiple containers independently', () => {
     const containers = [

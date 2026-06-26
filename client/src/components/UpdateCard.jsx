@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { pin, unpin, hideContainer } from '../api.js';
+import { pin, unpin } from '../api.js';
 import { useUpdateRunner } from '../hooks/useUpdateRunner.js';
 import StatusMessage from './StatusMessage.jsx';
 import StreamLog from './StreamLog.jsx';
@@ -66,15 +66,13 @@ const ExternalIcon = () => (
  *  - container: item shape from GET /api/containers
  *  - onSettled(name) — called once an update for this container finishes
  *  - onPinChange() — called after a pin/unpin so the dashboard can refresh
- *  - onHidden() — called after hiding so the dashboard can refresh
  *  - registerRunner(name, runFn) — handle for "Update all"
  */
-export default function UpdateCard({ container, onSettled, onPinChange, onHidden, registerRunner }) {
+export default function UpdateCard({ container, onSettled, onPinChange, registerRunner }) {
   const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, pinned, sourceUrl } =
     container;
 
   const [pinBusy, setPinBusy] = useState(false);
-  const [hideBusy, setHideBusy] = useState(false);
   const [actionError, setActionError] = useState('');
 
   const { run, busy, startError, status, lines } = useUpdateRunner(name, onSettled);
@@ -107,18 +105,6 @@ export default function UpdateCard({ container, onSettled, onPinChange, onHidden
       setPinBusy(false);
     }
   }, [pinned, image, onPinChange]);
-
-  const handleHide = useCallback(async () => {
-    setHideBusy(true);
-    setActionError('');
-    try {
-      await hideContainer(name);
-      if (onHidden) onHidden();
-    } catch (err) {
-      setActionError(err.message || 'Failed to hide container');
-      setHideBusy(false);
-    }
-  }, [name, onHidden]);
 
   const showUpdateAvailable = updateAvailable && !pinned;
   const link = sourceLink(sourceUrl);
@@ -184,10 +170,6 @@ export default function UpdateCard({ container, onSettled, onPinChange, onHidden
               <ExternalIcon />
             </a>
           )}
-          <button type="button" className="btn-ghost" onClick={handleHide} disabled={hideBusy}>
-            {hideBusy && <span className="spinner" aria-hidden="true" />}
-            Hide
-          </button>
         </div>
         <button
           type="button"

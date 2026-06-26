@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 import { logout } from '../api.js';
 import { useTheme } from '../hooks/useTheme.js';
 
@@ -69,6 +69,17 @@ export default function Header({ pendingCount = 0, onLoggedOut }) {
         <span>Diun Updater</span>
         {pendingCount > 0 && <span className="badge">{pendingCount}</span>}
       </Link>
+      <nav className="header-nav" aria-label="Primary">
+        <NavLink to="/" end className={({ isActive }) => `header-nav-link${isActive ? ' is-active' : ''}`}>
+          Updates
+        </NavLink>
+        <NavLink to="/history" className={({ isActive }) => `header-nav-link${isActive ? ' is-active' : ''}`}>
+          History
+        </NavLink>
+        <NavLink to="/settings" className={({ isActive }) => `header-nav-link${isActive ? ' is-active' : ''}`}>
+          Settings
+        </NavLink>
+      </nav>
       <div className="header-actions">
         <button
           type="button"

@@ -3,8 +3,6 @@ import {
   get,
   getPinned,
   unpin,
-  getHidden,
-  unhideContainer,
   getSettings,
   updateSettings,
 } from '../api.js';
@@ -17,11 +15,6 @@ export default function SettingsPage() {
   const [pinnedLoading, setPinnedLoading] = useState(true);
   const [pinnedError, setPinnedError] = useState('');
   const [unpinningRef, setUnpinningRef] = useState('');
-
-  const [hidden, setHidden] = useState([]);
-  const [hiddenLoading, setHiddenLoading] = useState(true);
-  const [hiddenError, setHiddenError] = useState('');
-  const [unhidingName, setUnhidingName] = useState('');
 
   const [settings, setSettings] = useState(null);
   const [settingsError, setSettingsError] = useState('');
@@ -38,25 +31,10 @@ export default function SettingsPage() {
     }
   }, []);
 
-  const loadHidden = useCallback(async () => {
-    setHiddenError('');
-    try {
-      const data = await getHidden();
-      setHidden(Array.isArray(data) ? data : []);
-    } catch (err) {
-      setHiddenError(err.message || 'Failed to load hidden containers');
-    }
-  }, []);
-
   useEffect(() => {
     setPinnedLoading(true);
     loadPinned().finally(() => setPinnedLoading(false));
   }, [loadPinned]);
-
-  useEffect(() => {
-    setHiddenLoading(true);
-    loadHidden().finally(() => setHiddenLoading(false));
-  }, [loadHidden]);
 
   useEffect(() => {
     getSettings()
@@ -99,22 +77,6 @@ export default function SettingsPage() {
       }
     },
     [loadPinned]
-  );
-
-  const handleUnhide = useCallback(
-    async (name) => {
-      setUnhidingName(name);
-      setHiddenError('');
-      try {
-        await unhideContainer(name);
-        await loadHidden();
-      } catch (err) {
-        setHiddenError(err.message || 'Failed to unhide container');
-      } finally {
-        setUnhidingName('');
-      }
-    },
-    [loadHidden]
   );
 
   return (
@@ -236,51 +198,6 @@ export default function SettingsPage() {
                 >
                   {unpinningRef === ref && <span className="spinner" aria-hidden="true" />}
                   Unpin
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="settings-section">
-        <h3>Hidden containers</h3>
-        {hiddenLoading && (
-          <div className="dashboard-list" aria-busy="true" aria-label="Loading hidden containers">
-            <div className="skeleton-card" style={{ height: 52 }} />
-          </div>
-        )}
-
-        {!hiddenLoading && hiddenError && (
-          <div className="error-state">
-            <p>{hiddenError}</p>
-            <button type="button" className="btn btn-primary" onClick={loadHidden}>
-              Retry
-            </button>
-          </div>
-        )}
-
-        {!hiddenLoading && !hiddenError && hidden.length === 0 && (
-          <div className="empty-state">
-            <p>No hidden containers.</p>
-          </div>
-        )}
-
-        {!hiddenLoading && !hiddenError && hidden.length > 0 && (
-          <ul className="pinned-list">
-            {hidden.map((name) => (
-              <li key={name} className="pinned-row">
-                <span className="pinned-ref truncate" title={name}>
-                  {name}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => handleUnhide(name)}
-                  disabled={unhidingName === name}
-                >
-                  {unhidingName === name && <span className="spinner" aria-hidden="true" />}
-                  Unhide
                 </button>
               </li>
             ))}
