@@ -46,7 +46,6 @@ apiRouter.get('/api/containers', async (req, res) => {
     containers,
     lookupEvent: db.latestUnresolvedEventForRef,
     isPinned: (ref) => db.isPinned(ref),
-    isHidden: (name) => db.isHidden(name),
   });
 
   for (const ref of refsToResolve) {
@@ -121,29 +120,6 @@ apiRouter.delete('/api/pin/:ref', (req, res) => {
   }
 
   db.unpin(normalized);
-  broadcastGlobal({ type: 'containers-changed' });
-  return res.status(200).json({ ok: true });
-});
-
-// --- Hidden containers (keyed by container name) ---
-
-apiRouter.get('/api/hidden', (req, res) => {
-  return res.status(200).json(db.getHidden());
-});
-
-apiRouter.post('/api/hide', (req, res) => {
-  const name = req.body?.name;
-  if (typeof name !== 'string' || name.trim() === '') {
-    return res.status(400).json({ error: 'invalid_payload' });
-  }
-  db.hide(name.trim());
-  broadcastGlobal({ type: 'containers-changed' });
-  return res.status(200).json({ ok: true });
-});
-
-apiRouter.delete('/api/hide/:name', (req, res) => {
-  const name = decodeURIComponent(req.params.name);
-  db.unhide(name);
   broadcastGlobal({ type: 'containers-changed' });
   return res.status(200).json({ ok: true });
 });

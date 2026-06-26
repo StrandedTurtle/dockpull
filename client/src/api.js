@@ -111,20 +111,6 @@ export function unpin(ref) {
   return del(`/pin/${encodeURIComponent(ref)}`);
 }
 
-// --- Hiding ---
-
-export function getHidden() {
-  return get('/hidden');
-}
-
-export function hideContainer(name) {
-  return post('/hide', { name });
-}
-
-export function unhideContainer(name) {
-  return del(`/hide/${encodeURIComponent(name)}`);
-}
-
 // --- Settings ---
 
 export function getSettings() {

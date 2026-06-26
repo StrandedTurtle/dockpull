@@ -140,23 +140,6 @@ always returns normalized refs. Pinning ("Pin Version") holds a container at
 its current version: it's never flagged for updates and is grouped into a
 separate section, but can still be updated by hand.
 
-### `GET /api/hidden`
-
-- Auth: cookie.
-- Response: `200` — array of hidden container names.
-
-### `POST /api/hide`
-
-- Auth: cookie.
-- Body: `{ "name": "string" }` — container name to hide from the dashboard.
-- Response: `200 { "ok": true }`. Idempotent.
-
-### `DELETE /api/hide/:name`
-
-- Auth: cookie.
-- Path param: `name` — container name to unhide (URL-encoded).
-- Response: `200 { "ok": true }`. Idempotent.
-
 ### `GET /api/settings`
 
 - Auth: cookie.
@@ -196,7 +179,6 @@ separate section, but can still be updated by hand.
   "updateAvailable": true,
   "availableDigest": "sha256:...",
   "pinned": false,
-  "hidden": false,
   "state": "running",
   "composeFile": "/opt/stacks/web/compose.yaml",
   "composeFileMissing": false,
@@ -227,8 +209,6 @@ Field notes:
 - `pinned` — `true` if the image ref is in the `pinned` table ("Pin Version":
   update indicator is suppressed and the container is grouped separately, but
   a manual update is still allowed).
-- `hidden` — `true` if the container name is in the `hidden` table; the
-  dashboard omits it (restore from Settings).
 - `state` — Docker container state (`running`, `exited`, etc.).
 - `composeFile` / `workingDir` — derived from
   `com.docker.compose.project.config_files` /

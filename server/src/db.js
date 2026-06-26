@@ -36,10 +36,6 @@ CREATE TABLE IF NOT EXISTS pinned (
   ref TEXT PRIMARY KEY,
   created_at TEXT DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS hidden (
-  container_name TEXT PRIMARY KEY,
-  created_at TEXT DEFAULT (datetime('now'))
-);
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
@@ -89,19 +85,6 @@ const stmts = {
   `),
   isPinned: db.prepare(`
     SELECT 1 FROM pinned WHERE ref = ? LIMIT 1
-  `),
-  hide: db.prepare(`
-    INSERT INTO hidden (container_name) VALUES (?)
-    ON CONFLICT(container_name) DO NOTHING
-  `),
-  unhide: db.prepare(`
-    DELETE FROM hidden WHERE container_name = ?
-  `),
-  getHidden: db.prepare(`
-    SELECT container_name FROM hidden ORDER BY created_at DESC
-  `),
-  isHidden: db.prepare(`
-    SELECT 1 FROM hidden WHERE container_name = ? LIMIT 1
   `),
   getSetting: db.prepare(`
     SELECT value FROM settings WHERE key = ? LIMIT 1
@@ -165,22 +148,6 @@ export function getPinned() {
 
 export function isPinned(ref) {
   return stmts.isPinned.get(ref) !== undefined;
-}
-
-export function hide(containerName) {
-  return stmts.hide.run(containerName);
-}
-
-export function unhide(containerName) {
-  return stmts.unhide.run(containerName);
-}
-
-export function getHidden() {
-  return stmts.getHidden.all().map((row) => row.container_name);
-}
-
-export function isHidden(containerName) {
-  return stmts.isHidden.get(containerName) !== undefined;
 }
 
 export function getSetting(key) {

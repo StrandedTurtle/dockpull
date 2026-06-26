@@ -22,14 +22,12 @@ import { isUpdateAvailable, digestsEqual } from './reconcile.js';
  *   - returns the latest unresolved event row for a normalized ref, or
  *     undefined if there is none.
  * @param {(normalizedRef: string) => boolean} params.isPinned
- * @param {(containerName: string) => boolean} [params.isHidden] - whether a
- *   container is hidden from the dashboard. Defaults to "never hidden".
  * @returns {{
  *   items: Array<object>,
  *   refsToResolve: string[]
  * }}
  */
-export function buildContainerItems({ containers, lookupEvent, isPinned, isHidden = () => false }) {
+export function buildContainerItems({ containers, lookupEvent, isPinned }) {
   const items = [];
   const refsToResolve = [];
 
@@ -63,7 +61,6 @@ export function buildContainerItems({ containers, lookupEvent, isPinned, isHidde
       updateAvailable,
       availableDigest,
       pinned: isPinned(c.normalizedRef),
-      hidden: isHidden(c.name),
       state: c.state,
       composeFile: c.composeFile,
       composeFileMissing: c.composeFileMissing ?? false,

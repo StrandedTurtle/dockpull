@@ -10,7 +10,6 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'diun-settings-'));
 process.env.DATA_DIR = tmp;
 
 const { getSettings, updateSettings } = await import('../src/settings.js');
-const db = await import('../src/db.js');
 
 test('settings: defaults when nothing stored', () => {
   assert.deepEqual(getSettings(), { defaultFilter: 'updates', autoCheckOnOpen: true });
@@ -31,13 +30,3 @@ test('settings: ignores unknown keys', () => {
   assert.doesNotThrow(() => updateSettings({ somethingUnknown: 'x' }));
 });
 
-test('hidden: hide/isHidden/unhide roundtrip', () => {
-  assert.equal(db.isHidden('cadvisor'), false);
-  db.hide('cadvisor');
-  assert.equal(db.isHidden('cadvisor'), true);
-  assert.deepEqual(db.getHidden(), ['cadvisor']);
-  db.hide('cadvisor'); // idempotent
-  assert.equal(db.getHidden().length, 1);
-  db.unhide('cadvisor');
-  assert.equal(db.isHidden('cadvisor'), false);
-});
