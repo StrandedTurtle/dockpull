@@ -12,8 +12,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate the image publish on the same tests CI runs, so a red test never
+  # ships an image.
+  verify:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Server tests
+        working-directory: server
+        run: npm ci && npm test
+      - name: Client build
+        working-directory: client
+        run: npm ci && npm run build
+
   publish:
     name: Build and push to GHCR
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read
