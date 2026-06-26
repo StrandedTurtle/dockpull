@@ -8,7 +8,7 @@
  */
 
 import express from 'express';
-import { listContainers } from '../docker.js';
+import { listContainers, getContainerImageMeta } from '../docker.js';
 import { buildContainerItems } from '../containers-service.js';
 import { normalizeRef } from '../reconcile.js';
 import { runCheck } from '../checker.js';
@@ -16,6 +16,7 @@ import { subscribeGlobal, broadcastGlobal } from '../sse.js';
 import { getSettings, updateSettings } from '../settings.js';
 import scheduler from '../scheduler.js';
 import { sendDiscordTest } from '../notify.js';
+import { getChangelog } from '../changelog.js';
 import * as db from '../db.js';
 
 export const apiRouter = express.Router();
@@ -158,6 +159,35 @@ apiRouter.post('/api/notify/test', async (req, res) => {
     return res.status(502).json({ error: 'webhook_failed', status: result.status });
   } catch (err) {
     return res.status(502).json({ error: 'webhook_failed', message: err.message });
+  }
+});
+
+// Best-effort changelog for a container's image (GitHub releases newer than
+// the running version, or a link-out). Cached briefly per image+version.
+const changelogCache = new Map(); // key -> { at, data }
+const CHANGELOG_TTL_MS = 10 * 60 * 1000;
+
+apiRouter.get('/api/changelog/:name', async (req, res) => {
+  let meta;
+  try {
+    meta = await getContainerImageMeta(req.params.name);
+  } catch (err) {
+    if (err.statusCode === 404) return res.status(404).json({ error: 'not_found' });
+    return res.status(503).json({ error: 'docker_unavailable', message: err.message });
+  }
+  if (!meta.image) return res.status(404).json({ error: 'not_found' });
+
+  const key = `${meta.image}|${meta.currentVersion || ''}`;
+  const cached = changelogCache.get(key);
+  if (cached && Date.now() - cached.at < CHANGELOG_TTL_MS) {
+    return res.status(200).json(cached.data);
+  }
+  try {
+    const data = await getChangelog(meta);
+    changelogCache.set(key, { at: Date.now(), data });
+    return res.status(200).json(data);
+  } catch (err) {
+    return res.status(502).json({ error: 'changelog_failed', message: err.message });
   }
 });
 

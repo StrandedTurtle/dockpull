@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { pin, unpin } from '../api.js';
+import { pin, unpin, getChangelog } from '../api.js';
 import { useUpdateRunner } from '../hooks/useUpdateRunner.js';
 import StatusMessage from './StatusMessage.jsx';
 import StreamLog from './StreamLog.jsx';
@@ -57,10 +57,61 @@ const ExternalIcon = () => (
   </svg>
 );
 
+// Renders a resolved changelog payload (GitHub release notes, a link-out, or
+// nothing). Release bodies render as plain text (React escapes — no XSS).
+function ChangelogContent({ data }) {
+  if (data.type === 'github') {
+    if (!data.releases.length) {
+      return (
+        <p className="changelog-empty">
+          No newer release notes found.{' '}
+          <a href={data.releasesUrl} target="_blank" rel="noopener noreferrer">
+            View releases
+          </a>
+        </p>
+      );
+    }
+    return (
+      <div className="changelog-releases">
+        {data.releases.map((r) => (
+          <div className="changelog-release" key={`${r.tag}-${r.url}`}>
+            <div className="changelog-release-head">
+              <a href={r.url} target="_blank" rel="noopener noreferrer">
+                {r.name || r.tag}
+              </a>
+              {r.publishedAt && (
+                <span className="changelog-date">
+                  {new Date(r.publishedAt).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+            {r.body && <pre className="changelog-body">{r.body}</pre>}
+          </div>
+        ))}
+        <a className="card-link" href={data.releasesUrl} target="_blank" rel="noopener noreferrer">
+          All releases
+          <ExternalIcon />
+        </a>
+      </div>
+    );
+  }
+  if (data.type === 'link') {
+    return (
+      <p className="changelog-empty">
+        {data.note ? `${data.note} ` : ''}
+        <a href={data.url} target="_blank" rel="noopener noreferrer">
+          {data.label || 'Open'}
+        </a>
+      </p>
+    );
+  }
+  return <p className="changelog-empty">No changelog source available for this image.</p>;
+}
+
 /**
- * A single container's card: identity, version, source/changelog link, pin +
- * hide controls, update button, and an expandable live log for the in-flight
- * (or most recent) update.
+ * A single container's card: identity, version, source/changelog link, pin
+ * control, update button, an expandable "What's changed" panel, and an
+ * expandable live log for the in-flight (or most recent) update.
  *
  * props:
  *  - container: item shape from GET /api/containers
@@ -74,6 +125,11 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
 
   const [pinBusy, setPinBusy] = useState(false);
   const [actionError, setActionError] = useState('');
+
+  const [clOpen, setClOpen] = useState(false);
+  const [clLoading, setClLoading] = useState(false);
+  const [clData, setClData] = useState(null);
+  const [clError, setClError] = useState('');
 
   const { run, busy, startError, status, lines } = useUpdateRunner(name, onSettled);
 
@@ -105,6 +161,23 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
       setPinBusy(false);
     }
   }, [pinned, image, onPinChange]);
+
+  const toggleChangelog = useCallback(async () => {
+    const next = !clOpen;
+    setClOpen(next);
+    if (next && !clData && !clLoading) {
+      setClLoading(true);
+      setClError('');
+      try {
+        const d = await getChangelog(name);
+        setClData(d);
+      } catch (err) {
+        setClError(err.message || 'Failed to load changelog');
+      } finally {
+        setClLoading(false);
+      }
+    }
+  }, [clOpen, clData, clLoading, name]);
 
   const showUpdateAvailable = updateAvailable && !pinned;
   const link = sourceLink(sourceUrl);
@@ -170,6 +243,11 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
               <ExternalIcon />
             </a>
           )}
+          {showUpdateAvailable && (
+            <button type="button" className="btn-ghost" onClick={toggleChangelog} aria-expanded={clOpen}>
+              {clOpen ? 'Hide changes' : "What's changed"}
+            </button>
+          )}
         </div>
         <button
           type="button"
@@ -181,6 +259,18 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
           {busy ? 'Updating…' : 'Update'}
         </button>
       </div>
+
+      {clOpen && (
+        <div className="changelog-panel">
+          {clLoading && (
+            <div className="changelog-loading">
+              <span className="spinner" aria-hidden="true" /> Loading release notes…
+            </div>
+          )}
+          {!clLoading && clError && <StatusMessage type="error" message={clError} />}
+          {!clLoading && !clError && clData && <ChangelogContent data={clData} />}
+        </div>
+      )}
 
       <StreamLog lines={lines} />
     </div>

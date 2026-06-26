@@ -125,4 +125,8 @@ export function testNotify(url) {
   return post('/notify/test', url ? { url } : {});
 }
 
+export function getChangelog(name) {
+  return get(`/changelog/${encodeURIComponent(name)}`);
+}
+
 export { ApiError };

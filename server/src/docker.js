@@ -647,4 +647,19 @@ export async function updateContainer(name, onLine) {
   };
 }
 
+/**
+ * Lightweight per-container image metadata for the changelog endpoint:
+ * the configured image ref plus its OCI version + source labels.
+ *
+ * @param {string} name
+ * @returns {Promise<{ image: string|null, currentVersion: string|null, sourceUrl: string|null }>}
+ */
+export async function getContainerImageMeta(name) {
+  const inspectData = await docker.getContainer(name).inspect();
+  const image = inspectData.Config?.Image || null;
+  if (!image) return { image: null, currentVersion: null, sourceUrl: null };
+  const { version, source } = await inspectImageMeta(inspectData.Image, image);
+  return { image, currentVersion: version, sourceUrl: source };
+}
+
 export { docker };
