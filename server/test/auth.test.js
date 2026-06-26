@@ -12,21 +12,21 @@ describe('isValidSession', () => {
   });
 
   test('returns false when cookie-parser rejected the signature (false in signedCookies)', () => {
-    assert.equal(isValidSession(makeReq({ signedCookies: { diun_session: false } })), false);
+    assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: false } })), false);
   });
 
   test('returns false when the expiry is in the past', () => {
     const expired = String(Date.now() - 1000);
-    assert.equal(isValidSession(makeReq({ signedCookies: { diun_session: expired } })), false);
+    assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: expired } })), false);
   });
 
   test('returns false when the cookie value is not numeric', () => {
-    assert.equal(isValidSession(makeReq({ signedCookies: { diun_session: 'not-a-number' } })), false);
+    assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: 'not-a-number' } })), false);
   });
 
   test('returns true when the expiry is in the future', () => {
     const future = String(Date.now() + 1000 * 60);
-    assert.equal(isValidSession(makeReq({ signedCookies: { diun_session: future } })), true);
+    assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: future } })), true);
   });
 });
 
@@ -66,7 +66,7 @@ describe('requireAuth', () => {
 
   test('calls next() for /api/ requests with a valid session', () => {
     const future = String(Date.now() + 1000 * 60);
-    const req = makeReq({ signedCookies: { diun_session: future }, path: '/api/containers' });
+    const req = makeReq({ signedCookies: { dockpull_session: future }, path: '/api/containers' });
     const res = { status: () => { throw new Error('should not respond'); } };
     let nextCalled = false;
     requireAuth(req, res, () => {

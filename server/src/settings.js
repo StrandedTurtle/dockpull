@@ -21,12 +21,12 @@ function enumOf(allowed, fallback) {
   return (v) => (allowed.includes(v) ? v : fallback);
 }
 
-function intInOrUndef(min, max) {
-  return (v) => {
-    const n = typeof v === 'number' ? v : parseInt(v, 10);
-    if (!Number.isFinite(n) || n < min || n > max) return undefined;
-    return Math.trunc(n);
-  };
+function isValidTime(v) {
+  return typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v.trim());
+}
+
+function timeOrUndef(v) {
+  return isValidTime(v) ? v.trim() : undefined;
 }
 
 function urlOrUndef(v) {
@@ -37,7 +37,9 @@ function urlOrUndef(v) {
 
 // --- env-seeded defaults ---
 const ENV_WEBHOOK = process.env.DISCORD_WEBHOOK_URL || '';
-const ENV_INTERVAL = intInOrUndef(1, 168)(process.env.CHECK_INTERVAL_HOURS) ?? 6;
+const ENV_TIME = isValidTime(process.env.SCHEDULED_CHECK_TIME)
+  ? process.env.SCHEDULED_CHECK_TIME.trim()
+  : '09:00';
 const ENV_BG_ENABLED = bool(process.env.BACKGROUND_CHECK_ENABLED, true);
 
 const SPEC = {
@@ -56,10 +58,11 @@ const SPEC = {
     fromStore: (v) => bool(v, ENV_BG_ENABLED),
     fromInput: (v) => (typeof v === 'boolean' ? v : undefined),
   },
-  backgroundCheckIntervalHours: {
-    default: ENV_INTERVAL,
-    fromStore: (v) => intInOrUndef(1, 168)(v) ?? ENV_INTERVAL,
-    fromInput: intInOrUndef(1, 168),
+  // Daily local time (HH:MM, 24h) for the scheduled scan.
+  scheduledCheckTime: {
+    default: ENV_TIME,
+    fromStore: (v) => (isValidTime(v) ? v.trim() : ENV_TIME),
+    fromInput: timeOrUndef,
   },
   discordEnabled: {
     default: ENV_WEBHOOK !== '',
@@ -78,7 +81,7 @@ const SPEC = {
  *   defaultFilter: 'updates'|'all',
  *   autoCheckOnOpen: boolean,
  *   backgroundCheckEnabled: boolean,
- *   backgroundCheckIntervalHours: number,
+ *   scheduledCheckTime: string,
  *   discordEnabled: boolean,
  *   discordWebhookUrl: string,
  * }}

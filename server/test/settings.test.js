@@ -6,7 +6,7 @@ import path from 'node:path';
 
 // Point DATA_DIR at a throwaway dir BEFORE importing db/settings — db.js
 // creates the SQLite file from config.DATA_DIR at import time.
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'diun-settings-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dockpull-settings-'));
 process.env.DATA_DIR = tmp;
 
 const { getSettings, updateSettings } = await import('../src/settings.js');
@@ -16,7 +16,7 @@ test('settings: defaults when nothing stored', () => {
     defaultFilter: 'updates',
     autoCheckOnOpen: true,
     backgroundCheckEnabled: true,
-    backgroundCheckIntervalHours: 6,
+    scheduledCheckTime: '09:00',
     discordEnabled: false,
     discordWebhookUrl: '',
   });
@@ -37,10 +37,12 @@ test('settings: ignores unknown keys', () => {
   assert.doesNotThrow(() => updateSettings({ somethingUnknown: 'x' }));
 });
 
-test('settings: interval bounds enforced', () => {
-  assert.equal(updateSettings({ backgroundCheckIntervalHours: 12 }).backgroundCheckIntervalHours, 12);
-  assert.throws(() => updateSettings({ backgroundCheckIntervalHours: 0 }), /invalid value/);
-  assert.throws(() => updateSettings({ backgroundCheckIntervalHours: 999 }), /invalid value/);
+test('settings: scheduledCheckTime validated (HH:MM)', () => {
+  assert.equal(updateSettings({ scheduledCheckTime: '07:30' }).scheduledCheckTime, '07:30');
+  assert.equal(updateSettings({ scheduledCheckTime: '23:59' }).scheduledCheckTime, '23:59');
+  assert.throws(() => updateSettings({ scheduledCheckTime: '24:00' }), /invalid value/);
+  assert.throws(() => updateSettings({ scheduledCheckTime: '9am' }), /invalid value/);
+  assert.throws(() => updateSettings({ scheduledCheckTime: '7:5' }), /invalid value/);
 });
 
 test('settings: webhook url validated, empty allowed', () => {

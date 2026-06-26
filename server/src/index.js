@@ -63,10 +63,10 @@ if (clientDistExists) {
 }
 
 const server = app.listen(config.PORT, () => {
-  console.log(`Diun Updater server listening at ${config.BASE_URL} (port ${config.PORT})`);
+  console.log(`DockPull server listening at ${config.BASE_URL} (port ${config.PORT})`);
 });
 
-// Background update checker (interval + Discord notify per settings).
+// Background daily scan (+ Discord notify) per settings.
 scheduler.start();
 
 // Graceful shutdown: stop accepting connections and checkpoint/close SQLite

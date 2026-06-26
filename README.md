@@ -1,4 +1,4 @@
-# Diun Web Updater
+# DockPull
 
 A small, self-hosted, mobile-first web UI for updating Docker containers that
 are managed by `docker compose` (e.g. via [Dockge](https://github.com/louislam/dockge)).
@@ -106,9 +106,9 @@ existing compose file (e.g. a `management` stack) and fill in the two secrets.
 
 ```yaml
 services:
-  diun-updater:
+  dockpull:
     image: ghcr.io/strandedturtle/diupdater:edge
-    container_name: diun-updater
+    container_name: dockpull
     restart: unless-stopped
     ports:
       - "5000:5000"
@@ -122,16 +122,16 @@ services:
       #    match STACKS_DIR above, or updates fail with "compose file not found"
       #    and relative bind mounts in your other stacks break on recreate.
       - /opt/stacks:/opt/stacks
-      - diun-updater-data:/data
+      - dockpull-data:/data
 
 volumes:
-  diun-updater-data:
+  dockpull-data:
 ```
 
 Generate the secret (`openssl rand -hex 32`), then start just this service:
 
 ```bash
-docker compose up -d diun-updater
+docker compose up -d dockpull
 ```
 
 Then open `http://<host-ip>:5000`.
@@ -199,7 +199,7 @@ critical part is the **same-path stacks mount**:
       - /var/run/docker.sock:/var/run/docker.sock
       # ⚠️ SAME PATH on host and in container — do not change one side only:
       - ${STACKS_DIR}:${STACKS_DIR}
-      - diun-updater-data:/data        # persistent SQLite (events/history/pins)
+      - dockpull-data:/data        # persistent SQLite (events/history/pins)
 ```
 
 **Why same-path?** This app calls `docker compose` against the *host* Docker
@@ -226,10 +226,10 @@ Check it's healthy:
 
 ```bash
 curl -s http://localhost:5000/api/health   # -> {"ok":true}
-docker logs diun-updater                    # -> "...server listening at ..."
+docker logs dockpull                    # -> "...server listening at ..."
 ```
 
-The SQLite database is created automatically in the `diun-updater-data` volume
+The SQLite database is created automatically in the `dockpull-data` volume
 on first start. The first time you load the UI you'll get the login screen —
 enter `ADMIN_PASSWORD`, and the dashboard will run an initial update check.
 
@@ -298,17 +298,17 @@ under `errors`).
 
 ### Background checks & Discord notifications
 
-By default the server also checks on a schedule (every 6h) so badges stay fresh
+By default the server runs a daily scan (09:00, server-local time) so badges stay fresh
 even when the app is closed. Configure it under **Settings → Background checks &
 Discord**:
 
-- **Background checks** on/off and interval.
+- **Daily scan** on/off and the time of day it runs.
 - **Discord webhook URL** — paste a Discord channel webhook to get a message when
   updates are found, then use **Send test message** to verify it. Each update is
   announced once (no repeats on every check).
 
 These can also be seeded from the environment (`BACKGROUND_CHECK_ENABLED`,
-`CHECK_INTERVAL_HOURS`, `DISCORD_WEBHOOK_URL`); the Settings UI overrides at
+`SCHEDULED_CHECK_TIME`, `DISCORD_WEBHOOK_URL`); the Settings UI overrides at
 runtime.
 
 ---
@@ -328,9 +328,9 @@ All configuration is via environment variables (see `.env.example`).
 | `SESSION_TTL` | `604800` | | Login cookie lifetime in seconds (7 days). |
 | `BASE_URL` | `http://localhost:5000` | | Public URL; if `https`, the cookie is set `Secure`. |
 | `DISCORD_WEBHOOK_URL` | — | | Discord webhook for update notifications (optional; also set in Settings). |
-| `CHECK_INTERVAL_HOURS` | `6` | | Background check interval in hours (1–168). |
+| `SCHEDULED_CHECK_TIME` | `09:00` | | Daily local time (HH:MM) for the scheduled scan. |
 | `BACKGROUND_CHECK_ENABLED` | `true` | | Whether the scheduled background check runs. |
-| `SELF_CONTAINER_NAME` | `diun-updater` | | This app's own container name, excluded from the dashboard so it can't update itself. |
+| `SELF_CONTAINER_NAME` | `dockpull` | | This app's own container name, excluded from the dashboard so it can't update itself. |
 
 The two required vars are enforced at startup — the server refuses to boot
 without them (a `SKIP_CONFIG_CHECK=1` escape hatch exists for skeleton
@@ -354,7 +354,7 @@ smoke-tests only; never use it in production).
   open internet or fronting it with Cloudflare Access if exposure matters.
 - **The app excludes its own container** from the dashboard (it can't safely
   update itself). Update the updater the normal way:
-  `docker compose pull diun-updater && docker compose up -d diun-updater`.
+  `docker compose pull dockpull && docker compose up -d dockpull`.
 
 ---
 
@@ -381,7 +381,7 @@ quay.io work.
 pending event automatically (this also covers multi-arch images, where the
 registry digest and the running digest legitimately differ). If a badge sticks,
 tap **Check for updates** again; if it persists, there may be a genuinely newer
-image — check the History tab and `docker logs diun-updater`.
+image — check the History tab and `docker logs dockpull`.
 
 **Can't log in / cookie not sticking.** If you're on `https`, make sure
 `BASE_URL` is your `https://` URL (otherwise the `Secure` cookie won't be set
@@ -430,5 +430,5 @@ cd client && npm run build    # production bundle -> client/dist/
 Build the production image manually (build context must be the repo root):
 
 ```bash
-docker build -f server/Dockerfile -t diun-updater .
+docker build -f server/Dockerfile -t dockpull .
 ```

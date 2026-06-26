@@ -108,7 +108,7 @@ export function parseRef(imageRef) {
 /**
  * Normalize a Docker image reference to a canonical `registry/repo:tag`
  * string (or `registry/repo` if the ref was digest-pinned with no tag).
- * Used as the matching key between Diun events and running containers.
+ * Used as the matching key between update events and running containers.
  *
  * @param {string} imageRef
  * @returns {string}

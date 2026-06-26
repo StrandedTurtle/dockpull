@@ -14,7 +14,7 @@ import { parseRef } from './reconcile.js';
 const DOCKER_HUB_API_HOST = 'registry-1.docker.io';
 
 // Accept manifest lists / OCI indexes first so we get the multi-arch index
-// digest where applicable, matching what Diun typically reports.
+// digest where applicable.
 const MANIFEST_ACCEPT = [
   'application/vnd.docker.distribution.manifest.list.v2+json',
   'application/vnd.oci.image.index.v1+json',

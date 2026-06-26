@@ -184,9 +184,9 @@ export default function SettingsPage() {
         <h3>Background checks &amp; Discord</h3>
         <div className="settings-row">
           <div className="settings-row-label">
-            <span>Background checks</span>
+            <span>Daily scan</span>
             <span className="settings-row-desc">
-              Periodically check for updates even when the app is closed.
+              Run a scan once a day even when the app is closed.
             </span>
           </div>
           <button
@@ -208,23 +208,19 @@ export default function SettingsPage() {
         </div>
         <div className="settings-row">
           <div className="settings-row-label">
-            <span>Check every</span>
-            <span className="settings-row-desc">How often the background check runs.</span>
+            <span>Daily scan time</span>
+            <span className="settings-row-desc">
+              When the daily scan runs (server's local time) — set this to when you want your
+              Discord ping.
+            </span>
           </div>
-          <select
-            className="settings-select"
-            value={settings?.backgroundCheckIntervalHours ?? 6}
-            onChange={(e) =>
-              saveSetting({ backgroundCheckIntervalHours: Number(e.target.value) }).catch(() => {})
-            }
+          <input
+            type="time"
+            className="settings-input settings-time"
+            value={settings?.scheduledCheckTime || '09:00'}
+            onChange={(e) => saveSetting({ scheduledCheckTime: e.target.value }).catch(() => {})}
             disabled={!settings || !settings?.backgroundCheckEnabled}
-          >
-            <option value={1}>1 hour</option>
-            <option value={3}>3 hours</option>
-            <option value={6}>6 hours</option>
-            <option value={12}>12 hours</option>
-            <option value={24}>24 hours</option>
-          </select>
+          />
         </div>
         <div className="settings-row settings-row-stack">
           <div className="settings-row-label">
@@ -329,7 +325,7 @@ export default function SettingsPage() {
 
       <section className="settings-section">
         <h3>About</h3>
-        <p className="about-app-name">Diun Updater</p>
+        <p className="about-app-name">DockPull</p>
         <p className="settings-row-desc">
           A small dashboard for checking your containers' images for updates and applying
           them by hand.

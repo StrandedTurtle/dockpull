@@ -67,7 +67,7 @@ export function sendDiscordUpdates(url, items) {
  */
 export function sendDiscordTest(url) {
   return postWebhook(url, {
-    content: '✅ Diun Updater test message — your Discord webhook is configured correctly.',
+    content: '✅ DockPull test message — your Discord webhook is configured correctly.',
   });
 }
 

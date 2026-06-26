@@ -3,7 +3,7 @@
  *
  * There are no user accounts — just one shared `ADMIN_PASSWORD`, compared in
  * constant time. On success we set a signed, httpOnly cookie
- * (`diun_session`) whose value is the absolute expiry timestamp (ms since
+ * (`dockpull_session`) whose value is the absolute expiry timestamp (ms since
  * epoch). Validity is just "signature ok (handled by cookie-parser) AND
  * expiry is in the future" — no server-side session store needed.
  */
@@ -14,7 +14,7 @@ import { config } from './config.js';
 
 export const authRouter = express.Router();
 
-const SESSION_COOKIE = 'diun_session';
+const SESSION_COOKIE = 'dockpull_session';
 
 // --- Simple in-memory login rate limiting ---------------------------------
 // Per-client-IP failed-attempt tracking with a lockout, to blunt brute-force
@@ -73,7 +73,7 @@ function isValidPassword(provided) {
 }
 
 /**
- * Reads `req.signedCookies.diun_session` and checks whether it represents a
+ * Reads `req.signedCookies.dockpull_session` and checks whether it represents a
  * non-expired session. cookie-parser has already verified the HMAC
  * signature by the time a value shows up in `signedCookies` (a
  * tampered/forged cookie ends up `undefined`/`false` there instead), so we
