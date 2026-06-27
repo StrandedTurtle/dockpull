@@ -63,7 +63,12 @@ export default function StackGroup({ title, count, updateCount = 0, storageKey, 
         {updateCount > 0 && <span className="badge stack-group-badge">{updateCount}</span>}
         <span className="stack-group-count">{count}</span>
       </button>
-      {open && <div className="stack-group-body">{children}</div>}
+      {/* Always mounted (hidden, not removed) so collapsing a group never
+          unmounts its cards -- e.g. unregistering their update runners,
+          which "Update all" depends on. */}
+      <div className="stack-group-body" hidden={!open}>
+        {children}
+      </div>
     </section>
   );
 }

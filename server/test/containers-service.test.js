@@ -35,6 +35,37 @@ describe('buildContainerItems', () => {
     assert.deepEqual(refsToResolve, []);
   });
 
+  test('event carries available_version -> surfaced as availableVersion', () => {
+    const containers = [makeContainer({ currentDigest: 'sha256:aaa' })];
+    const lookupEvent = () => ({ digest: 'sha256:bbb', available_version: '1.2.3' });
+    const isPinned = () => false;
+
+    const { items } = buildContainerItems({ containers, lookupEvent, isPinned });
+
+    assert.equal(items[0].availableVersion, '1.2.3');
+  });
+
+  test('no available_version on the event -> availableVersion null', () => {
+    const containers = [makeContainer({ currentDigest: 'sha256:aaa' })];
+    const lookupEvent = () => ({ digest: 'sha256:bbb' });
+    const isPinned = () => false;
+
+    const { items } = buildContainerItems({ containers, lookupEvent, isPinned });
+
+    assert.equal(items[0].availableVersion, null);
+  });
+
+  test('no update available -> availableVersion null even if the event has one', () => {
+    const containers = [makeContainer({ currentDigest: 'sha256:aaa' })];
+    const lookupEvent = () => ({ digest: 'sha256:aaa', available_version: '1.2.3' });
+    const isPinned = () => false;
+
+    const { items } = buildContainerItems({ containers, lookupEvent, isPinned });
+
+    assert.equal(items[0].updateAvailable, false);
+    assert.equal(items[0].availableVersion, null);
+  });
+
   test('event digest equals currentDigest -> updateAvailable false, ref pushed to refsToResolve', () => {
     const containers = [makeContainer({ currentDigest: 'sha256:aaa', normalizedRef: 'docker.io/library/nginx:latest' })];
     const lookupEvent = () => ({ digest: 'sha256:aaa' });
@@ -88,6 +119,7 @@ describe('buildContainerItems', () => {
       currentDigest: 'sha256:aaa',
       updateAvailable: false,
       availableDigest: null,
+      availableVersion: null,
       pinned: false,
       state: 'running',
       composeFile: '/stacks/web/docker-compose.yml',

@@ -26,10 +26,19 @@ export function useUpdateRunner(name, onSettled) {
   // once per run, so a connection error arriving after the result can't
   // overwrite a success or trigger a second re-fetch.
   const settledRef = useRef(false);
+  // The in-flight run's promise, if any. `run()` can be invoked through
+  // multiple paths (the per-card button, "Update all"'s sequential loop) --
+  // without this, a second call while one is already running would fire a
+  // second POST /api/update/:name and the server would correctly reject it
+  // with 409, surfacing as a spurious error even though the first call
+  // succeeds. Returning the same promise instead makes every caller await
+  // the one real update.
+  const pendingRunRef = useRef(null);
 
   const settle = useCallback(() => {
     if (settledRef.current) return;
     settledRef.current = true;
+    pendingRunRef.current = null;
     onSettled(name);
     if (resolveRef.current) {
       resolveRef.current();
@@ -38,7 +47,8 @@ export function useUpdateRunner(name, onSettled) {
   }, [name, onSettled]);
 
   const run = useCallback(() => {
-    return new Promise((resolve) => {
+    if (pendingRunRef.current) return pendingRunRef.current;
+    const promise = new Promise((resolve) => {
       resolveRef.current = resolve;
       settledRef.current = false;
       setStartError('');
@@ -56,6 +66,8 @@ export function useUpdateRunner(name, onSettled) {
         })
         .finally(() => setStarting(false));
     });
+    pendingRunRef.current = promise;
+    return promise;
   }, [name, reset, settle]);
 
   useEffect(() => {

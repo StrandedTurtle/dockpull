@@ -36,6 +36,7 @@ export function buildContainerItems({ containers, lookupEvent, isPinned }) {
 
     let updateAvailable;
     let availableDigest;
+    let availableVersion;
 
     if (event && digestsEqual(c.currentDigest, event.digest)) {
       // The running container's digest already matches the event's digest:
@@ -44,9 +45,11 @@ export function buildContainerItems({ containers, lookupEvent, isPinned }) {
       refsToResolve.push(c.normalizedRef);
       updateAvailable = false;
       availableDigest = null;
+      availableVersion = null;
     } else {
       updateAvailable = isUpdateAvailable(c.currentDigest, event?.digest);
       availableDigest = updateAvailable ? event.digest : null;
+      availableVersion = updateAvailable ? (event?.available_version ?? null) : null;
     }
 
     items.push({
@@ -60,6 +63,7 @@ export function buildContainerItems({ containers, lookupEvent, isPinned }) {
       currentDigest: c.currentDigest,
       updateAvailable,
       availableDigest,
+      availableVersion,
       pinned: isPinned(c.normalizedRef),
       state: c.state,
       composeFile: c.composeFile,
