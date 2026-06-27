@@ -200,6 +200,7 @@ separate section, but can still be updated by hand.
   "currentDigest": "sha256:...",
   "updateAvailable": true,
   "availableDigest": "sha256:...",
+  "availableVersion": "1.27.4",
   "pinned": false,
   "state": "running",
   "composeFile": "/opt/stacks/web/compose.yaml",
@@ -228,6 +229,10 @@ Field notes:
   different from `currentDigest`.
 - `availableDigest` — the digest from that unresolved event, if any (else
   `null`).
+- `availableVersion` — the `org.opencontainers.image.version` label read from
+  the AVAILABLE (remote) image when the update was found, best-effort (else
+  `null` — e.g. the image sets no version label, or `updateAvailable` is
+  `false`).
 - `pinned` — `true` if the image ref is in the `pinned` table ("Pin Version":
   update indicator is suppressed and the container is grouped separately, but
   a manual update is still allowed).

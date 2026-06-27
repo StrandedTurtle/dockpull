@@ -8,7 +8,7 @@
  */
 
 import { listContainers } from './docker.js';
-import { getRemoteDigest } from './registry.js';
+import { getRemoteDigest, getRemoteVersion } from './registry.js';
 import { digestsEqual } from './reconcile.js';
 import * as db from './db.js';
 
@@ -55,11 +55,15 @@ export async function runCheck() {
         const existing = db.latestUnresolvedEventForRef(c.normalizedRef);
         if (existing && digestsEqual(existing.digest, remote)) continue;
 
+        // Best-effort: only paid for images that actually have an update.
+        const availableVersion = await getRemoteVersion(c.image);
+
         db.recordEvent({
           image: c.image,
           normalized_ref: c.normalizedRef,
           status: 'update',
           digest: remote,
+          available_version: availableVersion,
           raw_json: JSON.stringify({ source: 'check' }),
         });
         updatesFound += 1;

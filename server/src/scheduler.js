@@ -35,6 +35,33 @@ export function msUntilNext(timeStr, now = new Date()) {
 }
 
 /**
+ * Decide what a notification run should announce. The message lists every
+ * container that currently has an unapplied, unpinned update -- not just the
+ * ones that haven't been announced yet -- so each message is a complete,
+ * actionable summary of everything pending (a still-unapplied update must
+ * never silently drop out of later messages just because it was mentioned
+ * once before). We only actually send when at least one of those is new
+ * since the last notification, so a fully-stale pending list doesn't get
+ * re-pinged on every run.
+ *
+ * @param {Array<{updateAvailable: boolean, pinned: boolean, image: string}>} items
+ * @param {Set<string>} unnotifiedRefs - normalized refs not yet announced.
+ * @param {(image: string) => string} normalizeRefFn
+ * @returns {{ toNotify: object[], hasNew: boolean }}
+ */
+export function selectNotifyTargets(items, unnotifiedRefs, normalizeRefFn) {
+  const toNotify = items.filter((i) => i.updateAvailable && !i.pinned);
+  const hasNew = toNotify.some((i) => {
+    try {
+      return unnotifiedRefs.has(normalizeRefFn(i.image));
+    } catch {
+      return false;
+    }
+  });
+  return { toNotify, hasNew };
+}
+
+/**
  * Run a check, then notify Discord about updates not yet announced. Resilient:
  * any failure (no Docker daemon, registry error, webhook down) is logged, not
  * thrown — the scheduler keeps running.
@@ -57,15 +84,8 @@ export async function runScheduledCheck() {
     isPinned: (ref) => db.isPinned(ref),
   });
 
-  const toNotify = items.filter((i) => {
-    if (!i.updateAvailable || i.pinned) return false;
-    try {
-      return unnotified.has(normalizeRef(i.image));
-    } catch {
-      return false;
-    }
-  });
-  if (toNotify.length === 0) return;
+  const { toNotify, hasNew } = selectNotifyTargets(items, unnotified, normalizeRef);
+  if (toNotify.length === 0 || !hasNew) return;
 
   const result = await sendDiscordUpdates(settings.discordWebhookUrl, toNotify);
   if (result.ok) {
@@ -117,4 +137,4 @@ export function stop() {
   }
 }
 
-export default { start, stop, reschedule, runScheduledCheck, msUntilNext };
+export default { start, stop, reschedule, runScheduledCheck, msUntilNext, selectNotifyTargets };

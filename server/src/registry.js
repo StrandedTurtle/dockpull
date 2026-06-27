@@ -103,4 +103,102 @@ export async function getRemoteDigest(imageRef, { timeoutMs = 10000 } = {}) {
   return res.headers.get('docker-content-digest') || null;
 }
 
-export default { getRemoteDigest, parseWwwAuthenticate };
+/**
+ * Picks which entry of a manifest list / OCI index to inspect for version
+ * labels: prefer linux/amd64 (most images publish one), then any linux
+ * platform, then whatever's first. Pure so it's unit-testable without a
+ * registry round-trip.
+ *
+ * @param {Array<{ platform?: { os?: string, architecture?: string } }>} manifests
+ * @returns {object|null}
+ */
+export function pickPlatformManifest(manifests) {
+  if (!Array.isArray(manifests) || manifests.length === 0) return null;
+  return (
+    manifests.find((m) => m.platform?.os === 'linux' && m.platform?.architecture === 'amd64') ||
+    manifests.find((m) => m.platform?.os === 'linux') ||
+    manifests[0]
+  );
+}
+
+async function authedJson(url, token, timeoutMs) {
+  const res = await fetch(url, {
+    headers: {
+      Accept: MANIFEST_ACCEPT,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) return null;
+  return res.json().catch(() => null);
+}
+
+/**
+ * Best-effort: resolve the `org.opencontainers.image.version` label baked
+ * into the AVAILABLE (remote) image's config, without pulling it — fetches
+ * the manifest, follows a manifest-list/OCI-index to one platform's
+ * manifest, then reads its config blob. Used only when a check already
+ * found a digest difference, so it's an extra cost paid only for images
+ * that actually have an update, not on every check.
+ *
+ * @param {string} imageRef
+ * @param {{ timeoutMs?: number }} [opts]
+ * @returns {Promise<string|null>} the version label, or null if unavailable
+ *   for any reason (no label, auth failure, network error, etc.) — never
+ *   throws.
+ */
+export async function getRemoteVersion(imageRef, { timeoutMs = 10000 } = {}) {
+  try {
+    const { registry, repository, tag } = parseRef(imageRef);
+    if (!tag) return null;
+
+    const host = apiHost(registry);
+    const manifestUrl = `https://${host}/v2/${repository}/manifests/${encodeURIComponent(tag)}`;
+
+    let token = null;
+    let res = await fetch(manifestUrl, {
+      headers: { Accept: MANIFEST_ACCEPT },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.status === 401) {
+      const wwwAuth = parseWwwAuthenticate(res.headers.get('www-authenticate'));
+      if (wwwAuth) {
+        token = await fetchToken(wwwAuth, repository, timeoutMs);
+        if (token) {
+          res = await fetch(manifestUrl, {
+            headers: { Accept: MANIFEST_ACCEPT, Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(timeoutMs),
+          });
+        }
+      }
+    }
+    if (!res.ok) return null;
+    const manifest = await res.json().catch(() => null);
+    if (!manifest) return null;
+
+    let imageManifest = manifest;
+    if (Array.isArray(manifest.manifests) && manifest.manifests.length > 0) {
+      const picked = pickPlatformManifest(manifest.manifests);
+      if (!picked?.digest) return null;
+      const subUrl = `https://${host}/v2/${repository}/manifests/${picked.digest}`;
+      imageManifest = await authedJson(subUrl, token, timeoutMs);
+      if (!imageManifest) return null;
+    }
+
+    const configDigest = imageManifest.config?.digest;
+    if (!configDigest) return null;
+
+    const blobUrl = `https://${host}/v2/${repository}/blobs/${configDigest}`;
+    const blobRes = await fetch(blobUrl, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!blobRes.ok) return null;
+    const imageConfig = await blobRes.json().catch(() => null);
+    return imageConfig?.config?.Labels?.['org.opencontainers.image.version'] || null;
+  } catch {
+    return null;
+  }
+}
+
+export default { getRemoteDigest, getRemoteVersion, parseWwwAuthenticate, pickPlatformManifest };
