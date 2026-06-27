@@ -81,7 +81,7 @@ The full endpoint/field reference is in [`API_CONTRACT.md`](./API_CONTRACT.md).
 
 ```bash
 # on your Docker host
-git clone <your-fork-url> diupdater && cd diupdater
+git clone <your-fork-url> dockpull && cd dockpull
 cp .env.example .env
 
 # fill in .env:
@@ -107,7 +107,7 @@ existing compose file (e.g. a `management` stack) and fill in the two secrets.
 ```yaml
 services:
   dockpull:
-    image: ghcr.io/strandedturtle/diupdater:edge
+    image: ghcr.io/strandedturtle/dockpull:edge
     container_name: dockpull
     restart: unless-stopped
     ports:
@@ -142,7 +142,7 @@ semver tags (`:0.1.0`, `:0.1`). Pin to a version for stability.
 
 > **Can't pull the image?** The GHCR package inherits the repo's visibility. To
 > let other hosts pull it without auth, make the package public: GitHub → your
-> avatar → **Packages** → `diupdater` → **Package settings** → **Change
+> avatar → **Packages** → `dockpull` → **Package settings** → **Change
 > visibility** → *Public*. Otherwise run `docker login ghcr.io` (with a PAT that
 > has `read:packages`) on each host first.
 
@@ -157,8 +157,8 @@ build from source? Use [Step-by-step setup](#step-by-step-setup) below instead.
 ### 1. Get the code onto your server
 
 ```bash
-git clone <your-fork-url> diupdater
-cd diupdater
+git clone <your-fork-url> dockpull
+cd dockpull
 ```
 
 ### 2. Create your `.env`
@@ -235,7 +235,7 @@ enter `ADMIN_PASSWORD`, and the dashboard will run an initial update check.
 
 > **Prefer a prebuilt image?** Releases publish a multi-arch image
 > (`linux/amd64` + `linux/arm64`) to GHCR. Instead of `build:`, point the
-> compose service at `image: ghcr.io/strandedturtle/diupdater:edge` (keep the
+> compose service at `image: ghcr.io/strandedturtle/dockpull:edge` (keep the
 > same environment + volumes) and `docker compose up -d` (no `--build`).
 
 ### 5. (Optional) Expose it with a Cloudflare Tunnel
