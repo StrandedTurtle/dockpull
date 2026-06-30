@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { getMe } from './api.js';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { getMe, setUnauthorizedHandler } from './api.js';
 import { useTheme } from './hooks/useTheme.js';
 import AuthPage from './AuthPage.jsx';
 import Dashboard from './Dashboard.jsx';
@@ -13,6 +13,7 @@ export default function App() {
   // Initialized at the app level so `data-theme` is set on <html> from the
   // first paint, before any route-specific component mounts.
   useTheme();
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
@@ -32,9 +33,17 @@ export default function App() {
     checkSession().finally(() => setLoading(false));
   }, [checkSession]);
 
+  // If any authenticated request 401s (session expired mid-use), drop straight
+  // back to the sign-in gate instead of stranding the user on a broken page.
+  useEffect(() => {
+    setUnauthorizedHandler(() => setAuthenticated(false));
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
   const handleAuthed = useCallback(() => {
     checkSession();
-  }, [checkSession]);
+    navigate('/'); // land on the dashboard after signing in
+  }, [checkSession, navigate]);
 
   const handleLoggedOut = useCallback(() => {
     setAuthenticated(false);

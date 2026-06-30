@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { getHistory } from '../api.js';
+import { getHistory, clearHistory } from '../api.js';
 import HistoryRow from '../components/HistoryRow.jsx';
+import ConfirmDialog from '../components/ConfirmDialog.jsx';
 
 const PAGE_LIMIT = 50;
 
@@ -12,6 +13,8 @@ export default function HistoryPage() {
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [filter, setFilter] = useState('');
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const loadFirstPage = useCallback(async () => {
     setError('');
@@ -53,6 +56,23 @@ export default function HistoryPage() {
     loadFirstPage().finally(() => setLoading(false));
   }, [loadFirstPage]);
 
+  const handleClear = useCallback(async () => {
+    setClearing(true);
+    setError('');
+    try {
+      await clearHistory();
+      setRows([]);
+      setOffset(0);
+      setHasMore(false);
+      setConfirmClear(false);
+    } catch (err) {
+      setError(err.message || 'Failed to clear history');
+      setConfirmClear(false);
+    } finally {
+      setClearing(false);
+    }
+  }, []);
+
   const filteredRows = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     if (!needle) return rows;
@@ -68,6 +88,14 @@ export default function HistoryPage() {
             {filteredRows.length}
             {filteredRows.length !== rows.length ? ` / ${rows.length}` : ''}
           </span>
+          <button
+            type="button"
+            className="btn btn-sm history-clear-btn"
+            onClick={() => setConfirmClear(true)}
+            disabled={rows.length === 0 || loading}
+          >
+            Clear history
+          </button>
         </div>
         <input
           type="text"
@@ -78,6 +106,17 @@ export default function HistoryPage() {
           aria-label="Filter history by container name"
         />
       </div>
+
+      {confirmClear && (
+        <ConfirmDialog
+          title="Clear all history?"
+          message="This permanently deletes every update-history entry. This can't be undone."
+          confirmLabel="Clear history"
+          confirming={clearing}
+          onConfirm={handleClear}
+          onCancel={() => setConfirmClear(false)}
+        />
+      )}
 
       {loading && (
         <div className="dashboard-list" aria-busy="true" aria-label="Loading history">

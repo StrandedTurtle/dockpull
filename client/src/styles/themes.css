@@ -47,7 +47,9 @@
   /* Text */
   --color-text: #1a1b1e;
   --color-text-muted: #495057;
-  --color-text-faint: #868e96;
+  /* #868e96 was borderline (~3:1) for small text on the light bg; darkened to
+     ~4.8:1 so faint timestamps/labels stay legible. */
+  --color-text-faint: #6b7280;
 
   /* Accent / status */
   --color-accent: #3b82f6;
