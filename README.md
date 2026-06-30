@@ -100,6 +100,7 @@ All config is via environment variables (see [`.env.example`](./.env.example)).
 | `BASE_URL` | `http://localhost:5000` | | Public URL; if `https`, the cookie is set `Secure`. |
 | `TRUST_PROXY` | _off_ | | Set (e.g. `1`) when behind a reverse proxy so rate-limiting sees real client IPs. |
 | `DISCORD_WEBHOOK_URL` | — | | Discord webhook for notifications (also editable in Settings). |
+| `GITHUB_TOKEN` | — | | Optional read-only token; raises GitHub's 60/hr changelog/version API limit to 5000/hr. |
 | `SCHEDULED_CHECK_TIME` | `09:00` | | Daily local time (HH:MM) for the background scan. |
 | `BACKGROUND_CHECK_ENABLED` | `true` | | Whether the scheduled scan runs. |
 | `SELF_CONTAINER_NAME` | `dockpull` | | This app's container, excluded so it can't update itself. |

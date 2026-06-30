@@ -235,10 +235,11 @@ Field notes:
   different from `currentDigest`.
 - `availableDigest` — the digest from that unresolved event, if any (else
   `null`).
-- `availableVersion` — the `org.opencontainers.image.version` label read from
-  the AVAILABLE (remote) image when the update was found, best-effort (else
-  `null` — e.g. the image sets no version label, or `updateAvailable` is
-  `false`).
+- `availableVersion` — a human version for the AVAILABLE (remote) image,
+  resolved when the update was found (best-effort, else `null`). Prefers the
+  image's `org.opencontainers.image.version` label; when that isn't a usable
+  version (e.g. `main`/`latest`/a sha) but the image declares a GitHub source,
+  falls back to that repo's latest release tag.
 - `pinned` — `true` if the image ref is in the `pinned` table ("Pin Version":
   update indicator is suppressed and the container is grouped separately, but
   a manual update is still allowed).

@@ -81,17 +81,71 @@ export function buildRegistryLink(image) {
   return null;
 }
 
+// Optional token raises GitHub's unauthenticated 60/hr limit to 5000/hr.
+function githubHeaders() {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'dockpull',
+  };
+  const token = process.env.GITHUB_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
 async function fetchGitHubReleases(owner, repo, timeoutMs = 10000) {
   const url = `https://api.github.com/repos/${owner}/${repo}/releases?per_page=30`;
   const res = await fetch(url, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'dockpull',
-    },
+    headers: githubHeaders(),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`GitHub API ${res.status}`);
   return res.json();
+}
+
+/**
+ * From a newest-first release list, pick the tag of the latest real release —
+ * skipping drafts and prereleases. Pure + testable.
+ *
+ * @param {Array<{tag_name?: string, name?: string, draft?: boolean, prerelease?: boolean}>} releases
+ * @returns {string|null}
+ */
+export function pickLatestReleaseTag(releases) {
+  if (!Array.isArray(releases)) return null;
+  for (const r of releases) {
+    if (r && !r.draft && !r.prerelease) {
+      const tag = (r.tag_name || r.name || '').trim();
+      if (tag) return tag;
+    }
+  }
+  return null;
+}
+
+// Cache release-tag lookups so repeated checks don't re-hit the GitHub API.
+const releaseTagCache = new Map(); // "owner/repo" -> { at, tag }
+const RELEASE_TAG_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * Best-effort latest-release tag for a GitHub repo (cached). Returns null on
+ * any failure — callers treat it as "no better version available".
+ *
+ * @param {string} owner
+ * @param {string} repo
+ * @returns {Promise<string|null>}
+ */
+export async function getLatestReleaseTag(owner, repo) {
+  const key = `${owner}/${repo}`;
+  const cached = releaseTagCache.get(key);
+  if (cached && Date.now() - cached.at < RELEASE_TAG_TTL_MS) {
+    return cached.tag;
+  }
+  try {
+    const releases = await fetchGitHubReleases(owner, repo);
+    const tag = pickLatestReleaseTag(releases);
+    releaseTagCache.set(key, { at: Date.now(), tag });
+    return tag;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -135,4 +189,11 @@ export async function getChangelog({ image, sourceUrl, currentVersion }) {
   return { type: 'none' };
 }
 
-export default { parseGitHubRepo, selectNewerReleases, buildRegistryLink, getChangelog };
+export default {
+  parseGitHubRepo,
+  selectNewerReleases,
+  buildRegistryLink,
+  getChangelog,
+  pickLatestReleaseTag,
+  getLatestReleaseTag,
+};

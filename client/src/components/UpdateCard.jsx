@@ -10,12 +10,29 @@ function shortDigest(digest) {
   return clean.slice(0, 12);
 }
 
-// Prefer a human version (OCI version label), then the tag, then a short
-// digest as a last resort, so the card shows "1.27.3" / "latest" rather than a
-// meaningless hash.
+// Channel/branch words and shas aren't real versions — showing them produces
+// misleading "main → main" cards. Mirrors server/src/version.js.
+const VERSION_STOPWORDS = new Set([
+  'latest', 'edge', 'stable', 'nightly', 'rolling', 'dev', 'devel', 'develop',
+  'development', 'main', 'master', 'head', 'release', 'releases', 'snapshot',
+  'canary', 'prod', 'production', 'current', 'beta', 'alpha', 'rc',
+]);
+function isMeaningfulVersion(v) {
+  if (typeof v !== 'string') return false;
+  const s = v.trim();
+  if (!s) return false;
+  if (VERSION_STOPWORDS.has(s.toLowerCase())) return false;
+  if (/^sha-?256[:-]/i.test(s)) return false;
+  if (/^[0-9a-f]{7,64}$/i.test(s)) return false;
+  return true;
+}
+
+// Prefer a real version (OCI version label), then a meaningful tag, then a
+// short digest as a last resort, so the card shows "1.27.3" rather than a
+// junk channel name like "main" or a meaningless hash.
 function displayVersion({ currentVersion, tag, currentDigest }) {
-  if (currentVersion) return currentVersion;
-  if (tag) return tag;
+  if (isMeaningfulVersion(currentVersion)) return currentVersion;
+  if (isMeaningfulVersion(tag)) return tag;
   return shortDigest(currentDigest);
 }
 
@@ -225,7 +242,7 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
           <div className="version-row">
             <span className="version-label">Available</span>
             <span className="version-value is-available" title={availableDigest || ''}>
-              {availableVersion || 'newer image'}
+              {isMeaningfulVersion(availableVersion) ? availableVersion : 'newer image'}
             </span>
           </div>
         )}
