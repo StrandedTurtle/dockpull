@@ -19,6 +19,7 @@ test('settings: defaults when nothing stored', () => {
     scheduledCheckTime: '09:00',
     discordEnabled: false,
     discordWebhookUrl: '',
+    notifyType: 'discord',
   });
 });
 

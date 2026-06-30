@@ -144,8 +144,11 @@ export function updateSettings(patch) {
   return request('PUT', '/settings', patch);
 }
 
-export function testNotify(url) {
-  return post('/notify/test', url ? { url } : {});
+export function testNotify(url, type) {
+  const body = {};
+  if (url) body.url = url;
+  if (type) body.type = type;
+  return post('/notify/test', body);
 }
 
 export function getChangelog(name) {

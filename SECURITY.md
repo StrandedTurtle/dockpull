@@ -22,9 +22,10 @@ DockPull is built for a **trusted LAN / homelab** behind authentication. It is
   with argument arrays — never a shell string — so container/label values can't
   inject commands.
 - **Parameterized SQL** (better-sqlite3 prepared statements).
-- **SSRF-guarded webhooks.** The Discord webhook URL must be `https` to a public
-  host; loopback/private/link-local/metadata addresses are rejected, including
-  hostnames that *resolve* to a private address.
+- **Notification URL is admin-only.** The notification target (Discord / ntfy /
+  Gotify / generic webhook) is set behind the login and may deliberately point at
+  an internal service (e.g. a self-hosted ntfy/Gotify on your LAN), so internal
+  hosts are allowed by design; it is validated only as a well-formed `http(s)` URL.
 - **Security headers** on every response: `Content-Security-Policy`,
   `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`,
   `Cross-Origin-Opener-Policy`, and `Strict-Transport-Security` when served over

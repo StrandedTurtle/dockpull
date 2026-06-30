@@ -2,6 +2,30 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { get, getPinned, unpin, getSettings, updateSettings, testNotify } from '../api.js';
 import { useTheme } from '../hooks/useTheme.js';
 
+// Per-target label/description/placeholder for the notification URL field.
+const NOTIFY_META = {
+  discord: {
+    label: 'Discord webhook URL',
+    desc: 'Paste a Discord channel webhook URL.',
+    placeholder: 'https://discord.com/api/webhooks/…',
+  },
+  ntfy: {
+    label: 'ntfy topic URL',
+    desc: 'Your ntfy topic URL (self-hosted or ntfy.sh).',
+    placeholder: 'https://ntfy.sh/my-topic',
+  },
+  gotify: {
+    label: 'Gotify message URL',
+    desc: 'Your Gotify server message URL, including the app token.',
+    placeholder: 'https://gotify.example.com/message?token=…',
+  },
+  webhook: {
+    label: 'Webhook URL',
+    desc: 'A URL that receives a JSON POST when updates are found.',
+    placeholder: 'https://example.com/hook',
+  },
+};
+
 export default function SettingsPage() {
   const { theme, toggle } = useTheme();
 
@@ -75,8 +99,8 @@ export default function SettingsPage() {
       if (settings && webhookDraft !== settings.discordWebhookUrl) {
         await saveSetting({ discordWebhookUrl: webhookDraft });
       }
-      await testNotify(webhookDraft || undefined);
-      setTestStatus('Sent — check your Discord channel.');
+      await testNotify(webhookDraft || undefined, settings?.notifyType);
+      setTestStatus('Sent — check your notification target.');
     } catch (err) {
       setTestStatus(err.message || 'Test failed');
     } finally {
@@ -181,7 +205,7 @@ export default function SettingsPage() {
       </section>
 
       <section className="settings-section">
-        <h3>Background checks &amp; Discord</h3>
+        <h3>Background checks &amp; notifications</h3>
         <div className="settings-row">
           <div className="settings-row-label">
             <span>Daily scan</span>
@@ -222,17 +246,34 @@ export default function SettingsPage() {
             disabled={!settings || !settings?.backgroundCheckEnabled}
           />
         </div>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Notify via</span>
+            <span className="settings-row-desc">Where update notifications are sent.</span>
+          </div>
+          <select
+            className="settings-input settings-select settings-time"
+            value={settings?.notifyType || 'discord'}
+            onChange={(e) => saveSetting({ notifyType: e.target.value }).catch(() => {})}
+            disabled={!settings}
+          >
+            <option value="discord">Discord</option>
+            <option value="ntfy">ntfy</option>
+            <option value="gotify">Gotify</option>
+            <option value="webhook">Webhook</option>
+          </select>
+        </div>
         <div className="settings-row settings-row-stack">
           <div className="settings-row-label">
-            <span>Discord webhook URL</span>
+            <span>{NOTIFY_META[settings?.notifyType || 'discord'].label}</span>
             <span className="settings-row-desc">
-              Get pinged when updates are found. Paste a Discord channel webhook URL.
+              {NOTIFY_META[settings?.notifyType || 'discord'].desc}
             </span>
           </div>
           <input
             type="url"
             className="settings-input"
-            placeholder="https://discord.com/api/webhooks/…"
+            placeholder={NOTIFY_META[settings?.notifyType || 'discord'].placeholder}
             value={webhookDraft}
             onChange={(e) => setWebhookDraft(e.target.value)}
             onBlur={() => {
@@ -246,7 +287,7 @@ export default function SettingsPage() {
         <div className="settings-row">
           <div className="settings-row-label">
             <span>Send notifications</span>
-            <span className="settings-row-desc">Enable Discord notifications for background checks.</span>
+            <span className="settings-row-desc">Notify on the daily scan when updates are found.</span>
           </div>
           <button
             type="button"

@@ -76,8 +76,8 @@ If the paths don't match you'll get `compose file not found` and broken bind mou
   previous image if it doesn't. **Pin Version** holds a container at its current version.
 - **History tab** — a log of past updates. **Clear history** wipes it (with a confirm).
 - **Settings tab** — theme, default view, auto-check on open, the **daily background
-  scan** + **Discord webhook** (with a "send test" button), and pinned-version
-  management.
+  scan** + **notifications** (Discord, ntfy, Gotify, or a generic webhook — with a
+  "send test" button), and pinned-version management.
 - **Install as an app (PWA)** — use your browser's "Add to Home Screen" / "Install"
   to get a standalone, full-screen icon.
 

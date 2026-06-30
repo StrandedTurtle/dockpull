@@ -15,9 +15,9 @@ import { runCheck } from '../checker.js';
 import { subscribeGlobal, broadcastGlobal } from '../sse.js';
 import { getSettings, updateSettings } from '../settings.js';
 import scheduler from '../scheduler.js';
-import { sendDiscordTest } from '../notify.js';
+import { sendTest } from '../notify.js';
 import { getChangelog } from '../changelog.js';
-import { isSafeWebhookUrl } from '../urlguard.js';
+import { isValidNotifyUrl } from '../urlguard.js';
 import * as db from '../db.js';
 
 export const apiRouter = express.Router();
@@ -157,28 +157,28 @@ apiRouter.put('/api/settings', (req, res) => {
 
 // Send a test Discord message to the configured (or supplied) webhook URL.
 apiRouter.post('/api/notify/test', async (req, res) => {
-  const url =
-    (typeof req.body?.url === 'string' && req.body.url.trim()) || getSettings().discordWebhookUrl;
+  const settings = getSettings();
+  const url = (typeof req.body?.url === 'string' && req.body.url.trim()) || settings.discordWebhookUrl;
+  const type =
+    (typeof req.body?.type === 'string' && req.body.type) || settings.notifyType || 'discord';
   if (!url) {
-    return res.status(400).json({ error: 'no_webhook', message: 'No Discord webhook URL configured.' });
+    return res.status(400).json({ error: 'no_webhook', message: 'No notification URL configured.' });
   }
-  // SSRF guard: only allow an https webhook to a public host (also enforced at
-  // send time, but reject early with a clear message here).
-  if (!isSafeWebhookUrl(url)) {
+  if (!isValidNotifyUrl(url)) {
     return res
       .status(400)
-      .json({ error: 'invalid_webhook', message: 'Webhook must be an https URL to a public host.' });
+      .json({ error: 'invalid_webhook', message: 'Notification URL must be a valid http(s) URL.' });
   }
   try {
-    const result = await sendDiscordTest(url);
+    const result = await sendTest(type, url);
     if (result.ok) return res.status(200).json({ ok: true });
     return res.status(502).json({ error: 'webhook_failed', status: result.status });
   } catch (err) {
     console.error(`api.js: POST /api/notify/test failed: ${err.message}`);
-    if (err.code === 'unsafe_url') {
+    if (err.code === 'invalid_url') {
       return res
         .status(400)
-        .json({ error: 'invalid_webhook', message: 'Webhook must be an https URL to a public host.' });
+        .json({ error: 'invalid_webhook', message: 'Notification URL must be a valid http(s) URL.' });
     }
     return res.status(502).json({ error: 'webhook_failed' });
   }
