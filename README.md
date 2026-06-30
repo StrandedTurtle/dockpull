@@ -79,9 +79,18 @@ If the paths don't match you'll get `compose file not found` and broken bind mou
 - **Install as an app (PWA)** — use your browser's "Add to Home Screen" / "Install"
   to get a standalone, full-screen icon.
 
-The update check queries registries directly (Docker Hub, GHCR, lscr.io, quay.io, …)
-for **public** images reachable anonymously. Private images that need credentials are
-skipped.
+The update check queries registries directly (Docker Hub, GHCR, lscr.io, quay.io, …).
+Public images work anonymously. For **private** images (and to dodge Docker Hub's
+anonymous rate limit), mount your Docker credentials read-only so DockPull can
+authenticate:
+
+```yaml
+    volumes:
+      - ~/.docker/config.json:/root/.docker/config.json:ro
+```
+
+This is the file `docker login` writes; only static `auths` entries are used (not
+credential-helper stores).
 
 ---
 
