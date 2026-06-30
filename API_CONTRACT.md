@@ -76,6 +76,20 @@ All request/response bodies are JSON unless noted otherwise.
   progress via the SSE endpoint below.
 - Errors: `404` if no such container; `409` if an update is already in
   progress for that container.
+- Note: after `up -d`, the container is health-checked; if it doesn't come up
+  healthy the result is reported as `success:false` with an actionable message
+  (and a rollback point is recorded).
+
+### `POST /api/update/:name/revert`
+
+- Auth: cookie.
+- Path param: `name` — container name.
+- Recreates the container from the image it ran before its last update (the
+  rollback point), then starts it. Same SSE streaming + result shape as an
+  update; subscribe via `GET /api/update/:name/stream`.
+- Response: `200 { "streamId": "string" }`.
+- Errors: `404 no_rollback` if there's nothing to revert to; `404 not_found`
+  if no such container; `409` if an update/revert is already in progress.
 
 ### `GET /api/update/:name/stream`
 
@@ -243,6 +257,10 @@ Field notes:
 - `pinned` — `true` if the image ref is in the `pinned` table ("Pin Version":
   update indicator is suppressed and the container is grouped separately, but
   a manual update is still allowed).
+- `canRevert` — `true` if a rollback point exists (the container was updated and
+  its previous image is remembered), so the UI can offer a one-click revert.
+- `rollbackVersion` — the previous version label for that rollback point, or
+  `null`.
 - `state` — Docker container state (`running`, `exited`, etc.).
 - `composeFile` / `workingDir` — derived from
   `com.docker.compose.project.config_files` /

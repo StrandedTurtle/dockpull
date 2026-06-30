@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { startUpdate } from '../api.js';
+import { startUpdate, revertUpdate } from '../api.js';
 import { useSSE } from './useSSE.js';
 
 /**
@@ -46,29 +46,37 @@ export function useUpdateRunner(name, onSettled) {
     }
   }, [name, onSettled]);
 
-  const run = useCallback(() => {
-    if (pendingRunRef.current) return pendingRunRef.current;
-    const promise = new Promise((resolve) => {
-      resolveRef.current = resolve;
-      settledRef.current = false;
-      setStartError('');
-      setStatus({ type: '', message: '' });
-      reset();
-      setStarting(true);
-      startUpdate(name)
-        .then(() => {
-          setStreamActive(true);
-          setStatus({ type: 'pending', message: 'Update started…' });
-        })
-        .catch((err) => {
-          setStartError(err.message || 'Failed to start update');
-          settle();
-        })
-        .finally(() => setStarting(false));
-    });
-    pendingRunRef.current = promise;
-    return promise;
-  }, [name, reset, settle]);
+  // Shared start path for both "update" and "revert" — same SSE stream + result
+  // handling, only the kickoff request and the pending message differ.
+  const start = useCallback(
+    (starter, pendingMsg) => {
+      if (pendingRunRef.current) return pendingRunRef.current;
+      const promise = new Promise((resolve) => {
+        resolveRef.current = resolve;
+        settledRef.current = false;
+        setStartError('');
+        setStatus({ type: '', message: '' });
+        reset();
+        setStarting(true);
+        starter(name)
+          .then(() => {
+            setStreamActive(true);
+            setStatus({ type: 'pending', message: pendingMsg });
+          })
+          .catch((err) => {
+            setStartError(err.message || 'Failed to start');
+            settle();
+          })
+          .finally(() => setStarting(false));
+      });
+      pendingRunRef.current = promise;
+      return promise;
+    },
+    [name, reset, settle]
+  );
+
+  const run = useCallback(() => start(startUpdate, 'Update started…'), [start]);
+  const revert = useCallback(() => start(revertUpdate, 'Reverting…'), [start]);
 
   useEffect(() => {
     if (!result) return;
@@ -92,5 +100,5 @@ export function useUpdateRunner(name, onSettled) {
 
   const busy = starting || streamActive;
 
-  return { run, busy, starting, startError, status, lines };
+  return { run, revert, busy, starting, startError, status, lines };
 }

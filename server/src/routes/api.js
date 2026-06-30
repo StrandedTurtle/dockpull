@@ -51,6 +51,7 @@ apiRouter.get('/api/containers', async (req, res) => {
     lookupEvent: db.latestUnresolvedEventForRef,
     isPinned: (ref) => db.isPinned(ref),
     lookupVersion: (digest) => db.getImageVersion(digest),
+    getRollback: (name) => db.getRollbackPoint(name),
   });
 
   for (const ref of refsToResolve) {

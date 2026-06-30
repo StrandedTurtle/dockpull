@@ -101,6 +101,10 @@ export function startUpdate(name) {
   return post(`/update/${encodeURIComponent(name)}`);
 }
 
+export function revertUpdate(name) {
+  return post(`/update/${encodeURIComponent(name)}/revert`);
+}
+
 // --- History ---
 
 export function getHistory(params = {}) {

@@ -544,6 +544,15 @@ a {
   color: var(--color-text);
 }
 
+.btn-ghost-danger {
+  color: var(--color-error);
+}
+
+.btn-ghost-danger:hover:not(:disabled) {
+  color: var(--color-error);
+  filter: brightness(1.1);
+}
+
 .pinned-groups {
   margin-top: 16px;
 }
