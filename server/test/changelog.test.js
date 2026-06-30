@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGitHubRepo, selectNewerReleases, buildRegistryLink } from '../src/changelog.js';
+import {
+  parseGitHubRepo,
+  selectNewerReleases,
+  buildRegistryLink,
+  pickLatestReleaseTag,
+} from '../src/changelog.js';
 
 test('parseGitHubRepo: extracts owner/repo, strips .git', () => {
   assert.deepEqual(parseGitHubRepo('https://github.com/jellyfin/jellyfin'), {
@@ -35,6 +40,23 @@ test('selectNewerReleases: up to date -> empty', () => {
 test('selectNewerReleases: unknown current version -> recent few', () => {
   const releases = [{ tag_name: 'a' }, { tag_name: 'b' }, { tag_name: 'c' }];
   assert.equal(selectNewerReleases(releases, null).length, 3);
+});
+
+test('pickLatestReleaseTag: newest non-draft, non-prerelease tag', () => {
+  const releases = [
+    { tag_name: 'v2.0.0-rc.1', prerelease: true },
+    { tag_name: 'v1.9.0-draft', draft: true },
+    { tag_name: 'v1.68.1' },
+    { tag_name: 'v1.68.0' },
+  ];
+  assert.equal(pickLatestReleaseTag(releases), 'v1.68.1');
+});
+
+test('pickLatestReleaseTag: falls back to name; null when none', () => {
+  assert.equal(pickLatestReleaseTag([{ name: 'Release 5.0' }]), 'Release 5.0');
+  assert.equal(pickLatestReleaseTag([{ tag_name: 'v1', draft: true }]), null);
+  assert.equal(pickLatestReleaseTag([]), null);
+  assert.equal(pickLatestReleaseTag(null), null);
 });
 
 test('buildRegistryLink: docker hub official + namespaced, ghcr', () => {

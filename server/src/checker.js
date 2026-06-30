@@ -10,9 +10,33 @@
 import { listContainers } from './docker.js';
 import { getRemoteDigest, getRemoteVersion } from './registry.js';
 import { digestsEqual } from './reconcile.js';
+import { isMeaningfulVersion } from './version.js';
+import { parseGitHubRepo, getLatestReleaseTag } from './changelog.js';
 import * as db from './db.js';
 
 const CONCURRENCY = 4;
+
+/**
+ * Best-effort human version for the AVAILABLE image. Prefer the image's own
+ * `org.opencontainers.image.version` label; if that isn't a usable version
+ * (e.g. `main`, `latest`, a sha) but the image declares a GitHub source, fall
+ * back to that repo's latest release tag (cached). Returns null if nothing
+ * meaningful is found.
+ *
+ * @param {{ image: string, sourceUrl?: string|null }} c
+ * @returns {Promise<string|null>}
+ */
+async function resolveAvailableVersion(c) {
+  const labelVersion = await getRemoteVersion(c.image);
+  if (isMeaningfulVersion(labelVersion)) return labelVersion;
+
+  const gh = parseGitHubRepo(c.sourceUrl);
+  if (gh) {
+    const tag = await getLatestReleaseTag(gh.owner, gh.repo);
+    if (isMeaningfulVersion(tag)) return tag;
+  }
+  return labelVersion || null;
+}
 
 /**
  * @returns {Promise<{ total: number, checked: number, updatesFound: number, errors: number }>}
@@ -53,10 +77,21 @@ export async function runCheck() {
         // unresolved event for this exact digest (avoid duplicate rows on
         // repeated checks).
         const existing = db.latestUnresolvedEventForRef(c.normalizedRef);
-        if (existing && digestsEqual(existing.digest, remote)) continue;
+        if (existing && digestsEqual(existing.digest, remote)) {
+          // Already flagged. If we previously stored a junk version label
+          // (e.g. "main"), try to backfill a real one now without waiting for
+          // a new image to appear.
+          if (!isMeaningfulVersion(existing.available_version)) {
+            const better = await resolveAvailableVersion(c);
+            if (isMeaningfulVersion(better)) {
+              db.updateEventAvailableVersion(c.normalizedRef, remote, better);
+            }
+          }
+          continue;
+        }
 
         // Best-effort: only paid for images that actually have an update.
-        const availableVersion = await getRemoteVersion(c.image);
+        const availableVersion = await resolveAvailableVersion(c);
 
         db.recordEvent({
           image: c.image,

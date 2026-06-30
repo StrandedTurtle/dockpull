@@ -71,6 +71,10 @@ const stmts = {
     UPDATE update_events SET resolved = 1
     WHERE normalized_ref = ? AND resolved = 0
   `),
+  updateEventAvailableVersion: db.prepare(`
+    UPDATE update_events SET available_version = ?
+    WHERE normalized_ref = ? AND digest = ? AND resolved = 0
+  `),
   recordUpdate: db.prepare(`
     INSERT INTO update_history (container_name, image, old_digest, new_digest, status, message)
     VALUES (@container_name, @image, @old_digest, @new_digest, @status, @message)
@@ -137,6 +141,10 @@ export function latestUnresolvedEventForRef(normalized_ref) {
 
 export function resolveEventsForRef(normalized_ref) {
   return stmts.resolveEventsForRef.run(normalized_ref);
+}
+
+export function updateEventAvailableVersion(normalized_ref, digest, available_version) {
+  return stmts.updateEventAvailableVersion.run(available_version ?? null, normalized_ref, digest);
 }
 
 export function recordUpdate({ container_name, image, old_digest, new_digest, status, message }) {
