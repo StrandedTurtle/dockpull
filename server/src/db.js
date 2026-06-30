@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT
 );
+CREATE TABLE IF NOT EXISTS image_versions (
+  digest TEXT PRIMARY KEY,
+  version TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
 CREATE INDEX IF NOT EXISTS idx_events_ref ON update_events(normalized_ref, resolved);
 CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC);
 `);
@@ -74,6 +79,14 @@ const stmts = {
   updateEventAvailableVersion: db.prepare(`
     UPDATE update_events SET available_version = ?
     WHERE normalized_ref = ? AND digest = ? AND resolved = 0
+  `),
+  setImageVersion: db.prepare(`
+    INSERT INTO image_versions (digest, version, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(digest) DO UPDATE SET version = excluded.version, updated_at = excluded.updated_at
+  `),
+  getImageVersion: db.prepare(`
+    SELECT version FROM image_versions WHERE digest = ? LIMIT 1
   `),
   recordUpdate: db.prepare(`
     INSERT INTO update_history (container_name, image, old_digest, new_digest, status, message)
@@ -145,6 +158,22 @@ export function resolveEventsForRef(normalized_ref) {
 
 export function updateEventAvailableVersion(normalized_ref, digest, available_version) {
   return stmts.updateEventAvailableVersion.run(available_version ?? null, normalized_ref, digest);
+}
+
+/**
+ * Remember a human-readable version for a specific image digest, so the
+ * dashboard can show a real version number even for images whose own labels
+ * are junk (e.g. `:latest` + `org.opencontainers.image.version=main`).
+ */
+export function setImageVersion(digest, version) {
+  if (!digest || !version) return undefined;
+  return stmts.setImageVersion.run(digest, version);
+}
+
+export function getImageVersion(digest) {
+  if (!digest) return null;
+  const row = stmts.getImageVersion.get(digest);
+  return row ? row.version : null;
 }
 
 export function recordUpdate({ container_name, image, old_digest, new_digest, status, message }) {

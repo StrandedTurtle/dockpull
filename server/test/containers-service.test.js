@@ -78,6 +78,43 @@ describe('buildContainerItems', () => {
     assert.deepEqual(refsToResolve, ['docker.io/library/nginx:latest']);
   });
 
+  test('junk currentVersion label -> falls back to remembered version for the digest', () => {
+    const containers = [makeContainer({ currentVersion: 'main', currentDigest: 'sha256:run' })];
+    const lookupVersion = (digest) => (digest === 'sha256:run' ? 'v1.68.1' : null);
+    const { items } = buildContainerItems({
+      containers,
+      lookupEvent: () => undefined,
+      isPinned: () => false,
+      lookupVersion,
+    });
+    assert.equal(items[0].currentVersion, 'v1.68.1');
+  });
+
+  test('meaningful currentVersion label is kept over the remembered version', () => {
+    const containers = [makeContainer({ currentVersion: '1.27.3', currentDigest: 'sha256:run' })];
+    const lookupVersion = () => 'should-not-be-used';
+    const { items } = buildContainerItems({
+      containers,
+      lookupEvent: () => undefined,
+      isPinned: () => false,
+      lookupVersion,
+    });
+    assert.equal(items[0].currentVersion, '1.27.3');
+  });
+
+  test('junk available_version on the event -> falls back to remembered version for availableDigest', () => {
+    const containers = [makeContainer({ currentDigest: 'sha256:aaa' })];
+    const lookupEvent = () => ({ digest: 'sha256:bbb', available_version: 'main' });
+    const lookupVersion = (digest) => (digest === 'sha256:bbb' ? 'v2.0.0' : null);
+    const { items } = buildContainerItems({
+      containers,
+      lookupEvent,
+      isPinned: () => false,
+      lookupVersion,
+    });
+    assert.equal(items[0].availableVersion, 'v2.0.0');
+  });
+
   test('pinned ref -> pinned true in the item', () => {
     const containers = [makeContainer()];
     const lookupEvent = () => undefined;

@@ -10,6 +10,7 @@
  */
 
 import { isUpdateAvailable, digestsEqual } from './reconcile.js';
+import { isMeaningfulVersion } from './version.js';
 
 /**
  * @param {object} params
@@ -22,12 +23,15 @@ import { isUpdateAvailable, digestsEqual } from './reconcile.js';
  *   - returns the latest unresolved event row for a normalized ref, or
  *     undefined if there is none.
  * @param {(normalizedRef: string) => boolean} params.isPinned
+ * @param {(digest: string|null) => (string|null)} [params.lookupVersion]
+ *   - returns a remembered human version for an image digest, or null. Lets the
+ *     dashboard show a real version even when the image's own labels are junk.
  * @returns {{
  *   items: Array<object>,
  *   refsToResolve: string[]
  * }}
  */
-export function buildContainerItems({ containers, lookupEvent, isPinned }) {
+export function buildContainerItems({ containers, lookupEvent, isPinned, lookupVersion = () => null }) {
   const items = [];
   const refsToResolve = [];
 
@@ -52,13 +56,22 @@ export function buildContainerItems({ containers, lookupEvent, isPinned }) {
       availableVersion = updateAvailable ? (event?.available_version ?? null) : null;
     }
 
+    // Prefer the image's own meaningful version label; otherwise fall back to a
+    // version we remembered for this digest from a prior check.
+    const currentVersion = isMeaningfulVersion(c.currentVersion)
+      ? c.currentVersion
+      : lookupVersion(c.currentDigest) ?? c.currentVersion ?? null;
+    if (updateAvailable && !isMeaningfulVersion(availableVersion)) {
+      availableVersion = lookupVersion(availableDigest) ?? availableVersion ?? null;
+    }
+
     items.push({
       name: c.name,
       project: c.project,
       service: c.service,
       image: c.image,
       tag: c.tag ?? null,
-      currentVersion: c.currentVersion ?? null,
+      currentVersion,
       sourceUrl: c.sourceUrl ?? null,
       currentDigest: c.currentDigest,
       updateAvailable,

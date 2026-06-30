@@ -39,6 +39,21 @@ async function resolveAvailableVersion(c) {
 }
 
 /**
+ * The running image's latest release tag, when its own version label is junk
+ * but it declares a GitHub source. Cached. Used for up-to-date images, where
+ * "running" == the latest release.
+ *
+ * @param {{ sourceUrl?: string|null }} c
+ * @returns {Promise<string|null>}
+ */
+async function releaseTagForSource(c) {
+  const gh = parseGitHubRepo(c.sourceUrl);
+  if (!gh) return null;
+  const tag = await getLatestReleaseTag(gh.owner, gh.repo);
+  return isMeaningfulVersion(tag) ? tag : null;
+}
+
+/**
  * @returns {Promise<{ total: number, checked: number, updatesFound: number, errors: number }>}
  * @throws if the Docker daemon can't be reached (caller maps to 503).
  */
@@ -70,6 +85,13 @@ export async function runCheck() {
         if (c.currentDigest && digestsEqual(remote, c.currentDigest)) {
           // Up to date — clear any stale unresolved event.
           db.resolveEventsForRef(c.normalizedRef);
+          // The running image IS the latest. If its own version label is junk
+          // (e.g. homarr's `main`), remember the source repo's latest release
+          // tag for this digest so the dashboard can show a real number.
+          if (!isMeaningfulVersion(c.currentVersion)) {
+            const tag = await releaseTagForSource(c);
+            if (tag) db.setImageVersion(c.currentDigest, tag);
+          }
           continue;
         }
 
@@ -85,6 +107,7 @@ export async function runCheck() {
             const better = await resolveAvailableVersion(c);
             if (isMeaningfulVersion(better)) {
               db.updateEventAvailableVersion(c.normalizedRef, remote, better);
+              db.setImageVersion(remote, better);
             }
           }
           continue;
@@ -101,6 +124,11 @@ export async function runCheck() {
           available_version: availableVersion,
           raw_json: JSON.stringify({ source: 'check' }),
         });
+        // Remember versions per digest: the available one keyed by the remote
+        // digest (so it shows instantly once the user updates), and the running
+        // one if its own label is usable.
+        if (isMeaningfulVersion(availableVersion)) db.setImageVersion(remote, availableVersion);
+        if (isMeaningfulVersion(c.currentVersion)) db.setImageVersion(c.currentDigest, c.currentVersion);
         updatesFound += 1;
       } catch (err) {
         errors += 1;
