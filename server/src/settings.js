@@ -10,6 +10,7 @@
  */
 
 import * as db from './db.js';
+import { isSafeWebhookUrl } from './urlguard.js';
 
 function bool(v, fallback) {
   if (v === undefined || v === null) return fallback;
@@ -29,9 +30,11 @@ function timeOrUndef(v) {
   return isValidTime(v) ? v.trim() : undefined;
 }
 
+// Accept an empty string (clears the webhook) or an https URL whose host isn't
+// internal — blocks SSRF via private/loopback/metadata addresses.
 function urlOrUndef(v) {
   if (v === '') return '';
-  if (typeof v === 'string' && /^https?:\/\//i.test(v.trim())) return v.trim();
+  if (typeof v === 'string' && isSafeWebhookUrl(v)) return v.trim();
   return undefined;
 }
 

@@ -142,6 +142,57 @@ a {
   font-size: 0.85rem;
 }
 
+.btn-danger {
+  background: var(--color-error);
+  border-color: var(--color-error);
+  color: #ffffff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+/* ---------- Confirm dialog ---------- */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--color-overlay);
+}
+
+.confirm-dialog {
+  width: 100%;
+  max-width: 380px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 20px;
+}
+
+.confirm-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.confirm-message {
+  margin: 0 0 18px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .btn-icon {
   padding: 8px;
 }
@@ -449,6 +500,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
 }
@@ -456,6 +508,7 @@ a {
 .card-actions-left {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   min-width: 0;
 }
@@ -794,16 +847,26 @@ a {
   gap: 12px;
 }
 
+/* Separate consecutive rows so dense sections (Background checks) don't feel
+   cramped — a subtle divider + breathing room between each control. */
+.settings-row + .settings-row {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
 .settings-row-label {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  min-width: 0;
 }
 
 .settings-row-desc {
   font-size: 0.85rem;
   color: var(--color-text-muted);
-  margin: 0 0 8px;
+  margin: 0;
+  line-height: 1.4;
 }
 
 .theme-switch {
@@ -935,11 +998,11 @@ a {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   min-height: 56px;
   padding: 6px 4px;
-  color: var(--color-text-faint);
-  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
   font-weight: 600;
   text-decoration: none;
 }
@@ -1275,4 +1338,26 @@ a {
 .settings-time {
   width: auto;
   min-width: 120px;
+}
+
+/* ---------- Settings: stack rows vertically on phones ---------- */
+/* On narrow screens the label + control no longer fit side-by-side without
+   cramping, so stack them and let controls go full-width / left-aligned. */
+@media (max-width: 540px) {
+  .settings-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  /* Controls align to the start once stacked under their label. */
+  .settings-row .theme-switch,
+  .settings-row .filter-row {
+    align-self: flex-start;
+  }
+
+  .settings-time {
+    width: 100%;
+    min-width: 0;
+  }
 }

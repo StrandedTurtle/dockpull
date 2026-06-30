@@ -23,6 +23,17 @@ async function parseBody(res) {
   }
 }
 
+// Global handler invoked when an authenticated request comes back 401 (an
+// expired/cleared session mid-use). App registers this to drop the user back
+// to the sign-in gate. Auth endpoints are excluded below so a wrong-password
+// login (also 401) doesn't trigger it.
+let onUnauthorized = null;
+export function setUnauthorizedHandler(fn) {
+  onUnauthorized = fn;
+}
+
+const AUTH_PATHS = ['/auth/login', '/auth/me'];
+
 async function request(method, path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -34,6 +45,10 @@ async function request(method, path, body) {
   const data = await parseBody(res);
 
   if (!res.ok) {
+    if (res.status === 401 && !AUTH_PATHS.some((p) => path.startsWith(p))) {
+      // Session is gone — bounce back to the login gate.
+      if (onUnauthorized) onUnauthorized();
+    }
     const errMessage =
       (data && typeof data === 'object' && data.error) ||
       (typeof data === 'string' && data) ||
@@ -95,6 +110,10 @@ export function getHistory(params = {}) {
   if (params.offset !== undefined) search.set('offset', params.offset);
   const qs = search.toString();
   return get(`/history${qs ? `?${qs}` : ''}`);
+}
+
+export function clearHistory() {
+  return del('/history');
 }
 
 // --- Pinning ---

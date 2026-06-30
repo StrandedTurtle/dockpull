@@ -86,6 +86,9 @@ const stmts = {
     ORDER BY created_at DESC, id DESC
     LIMIT ? OFFSET ?
   `),
+  clearHistory: db.prepare(`
+    DELETE FROM update_history
+  `),
   pin: db.prepare(`
     INSERT INTO pinned (ref) VALUES (?)
     ON CONFLICT(ref) DO NOTHING
@@ -152,6 +155,11 @@ export function getHistory({ containerName, limit = 50, offset = 0 } = {}) {
     return stmts.getHistoryByContainer.all(containerName, limit, offset);
   }
   return stmts.getHistoryAll.all(limit, offset);
+}
+
+/** Delete all update-history rows. Returns the better-sqlite3 run info. */
+export function clearHistory() {
+  return stmts.clearHistory.run();
 }
 
 export function pin(ref) {

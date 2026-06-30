@@ -115,6 +115,12 @@ All request/response bodies are JSON unless noted otherwise.
 - Query params: `limit` (default `50`), `offset` (default `0`).
 - Response: same shape as `GET /api/history`, filtered to that container.
 
+### `DELETE /api/history`
+
+- Auth: cookie.
+- Deletes **all** update-history rows.
+- Response: `200` — `{ "ok": true }`.
+
 ### `GET /api/pinned`
 
 - Auth: cookie.
