@@ -260,9 +260,9 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
               <ExternalIcon />
             </a>
           )}
-          {showUpdateAvailable && (
+          {link && (
             <button type="button" className="btn-ghost" onClick={toggleChangelog} aria-expanded={clOpen}>
-              {clOpen ? 'Hide changes' : "What's changed"}
+              {clOpen ? 'Hide changes' : showUpdateAvailable ? "What's changed" : 'Release notes'}
             </button>
           )}
         </div>
