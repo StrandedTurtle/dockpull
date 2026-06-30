@@ -9,6 +9,7 @@ import db from './db.js';
 import { authRouter, requireAuth } from './auth.js';
 import { apiRouter } from './routes/api.js';
 import { updateRouter } from './routes/update.js';
+import { securityHeaders } from './security.js';
 import scheduler from './scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,6 +27,15 @@ if (process.env.SKIP_CONFIG_CHECK !== '1') {
 
 const app = express();
 app.disable('x-powered-by');
+
+// Only trust X-Forwarded-* when explicitly configured (behind a known reverse
+// proxy). Default `false` keeps client IPs un-spoofable for login throttling.
+if (config.TRUST_PROXY !== false) {
+  app.set('trust proxy', config.TRUST_PROXY);
+}
+
+// Security headers for every response (no external dependency).
+app.use(securityHeaders({ https: config.BASE_URL.startsWith('https') }));
 
 app.use(express.json());
 app.use(cookieParser(config.SESSION_SECRET));

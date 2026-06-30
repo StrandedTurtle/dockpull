@@ -17,6 +17,7 @@ import { getSettings, updateSettings } from '../settings.js';
 import scheduler from '../scheduler.js';
 import { sendDiscordTest } from '../notify.js';
 import { getChangelog } from '../changelog.js';
+import { isSafeWebhookUrl } from '../urlguard.js';
 import * as db from '../db.js';
 
 export const apiRouter = express.Router();
@@ -42,7 +43,7 @@ apiRouter.get('/api/containers', async (req, res) => {
     containers = await listContainers();
   } catch (err) {
     console.error(`api.js: GET /api/containers failed to list containers: ${err.message}`);
-    return res.status(503).json({ error: 'docker_unavailable', message: err.message });
+    return res.status(503).json({ error: 'docker_unavailable' });
   }
 
   const { items, refsToResolve } = buildContainerItems({
@@ -65,7 +66,7 @@ apiRouter.post('/api/check', async (req, res) => {
     result = await runCheck();
   } catch (err) {
     console.error(`api.js: POST /api/check failed: ${err.message}`);
-    return res.status(503).json({ error: 'docker_unavailable', message: err.message });
+    return res.status(503).json({ error: 'docker_unavailable' });
   }
   broadcastGlobal({ type: 'containers-changed' });
   return res.status(200).json(result);
@@ -90,6 +91,12 @@ apiRouter.get('/api/history/:name', (req, res) => {
   const offset = toSafeInt(req.query.offset, 0);
   const rows = db.getHistory({ containerName: req.params.name, limit, offset });
   return res.status(200).json(rows);
+});
+
+// Wipe all update history (behind requireAuth, like the rest of /api/*).
+apiRouter.delete('/api/history', (req, res) => {
+  db.clearHistory();
+  return res.status(200).json({ ok: true });
 });
 
 apiRouter.get('/api/pinned', (req, res) => {
@@ -153,12 +160,25 @@ apiRouter.post('/api/notify/test', async (req, res) => {
   if (!url) {
     return res.status(400).json({ error: 'no_webhook', message: 'No Discord webhook URL configured.' });
   }
+  // SSRF guard: only allow an https webhook to a public host (also enforced at
+  // send time, but reject early with a clear message here).
+  if (!isSafeWebhookUrl(url)) {
+    return res
+      .status(400)
+      .json({ error: 'invalid_webhook', message: 'Webhook must be an https URL to a public host.' });
+  }
   try {
     const result = await sendDiscordTest(url);
     if (result.ok) return res.status(200).json({ ok: true });
     return res.status(502).json({ error: 'webhook_failed', status: result.status });
   } catch (err) {
-    return res.status(502).json({ error: 'webhook_failed', message: err.message });
+    console.error(`api.js: POST /api/notify/test failed: ${err.message}`);
+    if (err.code === 'unsafe_url') {
+      return res
+        .status(400)
+        .json({ error: 'invalid_webhook', message: 'Webhook must be an https URL to a public host.' });
+    }
+    return res.status(502).json({ error: 'webhook_failed' });
   }
 });
 
@@ -173,7 +193,8 @@ apiRouter.get('/api/changelog/:name', async (req, res) => {
     meta = await getContainerImageMeta(req.params.name);
   } catch (err) {
     if (err.statusCode === 404) return res.status(404).json({ error: 'not_found' });
-    return res.status(503).json({ error: 'docker_unavailable', message: err.message });
+    console.error(`api.js: GET /api/changelog/${req.params.name} inspect failed: ${err.message}`);
+    return res.status(503).json({ error: 'docker_unavailable' });
   }
   if (!meta.image) return res.status(404).json({ error: 'not_found' });
 
@@ -187,7 +208,8 @@ apiRouter.get('/api/changelog/:name', async (req, res) => {
     changelogCache.set(key, { at: Date.now(), data });
     return res.status(200).json(data);
   } catch (err) {
-    return res.status(502).json({ error: 'changelog_failed', message: err.message });
+    console.error(`api.js: GET /api/changelog/${req.params.name} failed: ${err.message}`);
+    return res.status(502).json({ error: 'changelog_failed' });
   }
 });
 

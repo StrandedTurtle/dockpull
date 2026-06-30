@@ -6,6 +6,8 @@
  * network; `sendDiscord` does the actual POST.
  */
 
+import { assertPublicWebhookUrl } from './urlguard.js';
+
 const MAX_LISTED = 25; // keep the message from blowing past Discord's limits
 
 /**
@@ -39,6 +41,9 @@ export function buildDiscordPayload(items) {
  * @returns {Promise<{ ok: boolean, status: number }>}
  */
 export async function postWebhook(url, payload, { timeoutMs = 10000 } = {}) {
+  // SSRF guard: reject non-https / internal / private-resolving URLs before we
+  // make any outbound request.
+  await assertPublicWebhookUrl(url);
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

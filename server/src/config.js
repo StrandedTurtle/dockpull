@@ -9,6 +9,21 @@ function envInt(name, fallback) {
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+/**
+ * Parse the TRUST_PROXY env into a value Express's `trust proxy` accepts.
+ * Empty/unset or falsy → `false` (don't trust XFF). `true`/`1`/`yes`/`on` →
+ * `true`. A bare integer → that hop count. Anything else (e.g. a subnet) is
+ * passed through verbatim.
+ */
+function parseTrustProxy(raw) {
+  if (raw === undefined || raw === '') return false;
+  const v = String(raw).trim().toLowerCase();
+  if (v === 'false' || v === '0' || v === 'no' || v === 'off') return false;
+  if (v === 'true' || v === 'yes' || v === 'on') return true;
+  if (/^\d+$/.test(v)) return parseInt(v, 10);
+  return String(raw).trim();
+}
+
 export const config = {
   PORT: envInt('PORT', 5000),
   STACKS_DIR: process.env.STACKS_DIR || '/stacks',
@@ -22,6 +37,12 @@ export const config = {
   // can't try to update (and kill) itself. Defaults to the container_name
   // used in the shipped docker-compose.yml; override if you rename it.
   SELF_CONTAINER_NAME: process.env.SELF_CONTAINER_NAME || 'dockpull',
+  // Express `trust proxy` setting. Leave unset/false when the app is exposed
+  // directly. Set it when behind a reverse proxy (nginx, Traefik, Cloudflare)
+  // so `req.ip` (used for login rate-limiting) reflects the real client and
+  // the Secure cookie is detected. Accepts `true`/`1`, a hop count (e.g. `1`),
+  // or a subnet string passed straight to Express.
+  TRUST_PROXY: parseTrustProxy(process.env.TRUST_PROXY),
 };
 
 /**
