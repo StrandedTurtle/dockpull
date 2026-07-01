@@ -63,7 +63,7 @@ jobs:
       # arm64 binaries crashed with "uncaught target signal 4 (Illegal
       # instruction)", which core-dumped and left the build hung. A current
       # QEMU emulates the new userspace correctly.
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
         with:
           image: tonistiigi/binfmt:qemu-v10.2.3
       - uses: docker/setup-buildx-action@v4
