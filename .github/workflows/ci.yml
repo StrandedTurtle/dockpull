@@ -3,6 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # Validate PRs (incl. Dependabot) before merge — but NOT arbitrary branch
+  # pushes, so only main and PRs targeting it run CI.
+  pull_request:
+    branches: [main]
 
 jobs:
   server:

@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 
-dotenv.config();
+// quiet: suppress dotenv 17's startup tip/log line for a clean boot.
+dotenv.config({ quiet: true });
 
 function envInt(name, fallback) {
   const raw = process.env[name];
