@@ -71,17 +71,28 @@ If the paths don't match you'll get `compose file not found` and broken bind mou
 - **Updates tab** — containers grouped by stack, update-available ones on top.
   Defaults to showing only what needs updating; flip to **All** to see everything.
   Tap **Update** to pull + recreate that service (watch live logs), or **Update all**
-  to run them one at a time. **Pin Version** holds a container at its current version.
+  to run them one at a time. After an update DockPull verifies the container actually
+  comes up healthy (catching crash-loops), and offers a one-click **Revert** to the
+  previous image if it doesn't. **Pin Version** holds a container at its current version.
 - **History tab** — a log of past updates. **Clear history** wipes it (with a confirm).
 - **Settings tab** — theme, default view, auto-check on open, the **daily background
-  scan** + **Discord webhook** (with a "send test" button), and pinned-version
-  management.
+  scan** + **notifications** (Discord, ntfy, Gotify, or a generic webhook — with a
+  "send test" button), and pinned-version management.
 - **Install as an app (PWA)** — use your browser's "Add to Home Screen" / "Install"
   to get a standalone, full-screen icon.
 
-The update check queries registries directly (Docker Hub, GHCR, lscr.io, quay.io, …)
-for **public** images reachable anonymously. Private images that need credentials are
-skipped.
+The update check queries registries directly (Docker Hub, GHCR, lscr.io, quay.io, …).
+Public images work anonymously. For **private** images (and to dodge Docker Hub's
+anonymous rate limit), mount your Docker credentials read-only so DockPull can
+authenticate:
+
+```yaml
+    volumes:
+      - ~/.docker/config.json:/root/.docker/config.json:ro
+```
+
+This is the file `docker login` writes; only static `auths` entries are used (not
+credential-helper stores).
 
 ---
 
@@ -118,6 +129,11 @@ webhooks, and security headers. See **[SECURITY.md](./SECURITY.md)** for the thr
 model and hardening tips (HTTPS/`BASE_URL`, `TRUST_PROXY`, `SESSION_TTL`).
 
 To update DockPull itself: `docker compose pull dockpull && docker compose up -d dockpull`.
+
+**Behind a reverse proxy?** Set `TRUST_PROXY=1`. To serve under a **subpath**
+(`https://host/dockpull/`), either have the proxy strip the prefix, or set
+`BASE_PATH=/dockpull` and build the client with the same value
+(`BASE_PATH=/dockpull docker compose build`).
 
 ---
 

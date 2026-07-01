@@ -7,6 +7,9 @@
  * mounting comment in index.js). This router itself adds no auth.
  */
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { listContainers, getContainerImageMeta } from '../docker.js';
 import { buildContainerItems } from '../containers-service.js';
@@ -15,12 +18,27 @@ import { runCheck } from '../checker.js';
 import { subscribeGlobal, broadcastGlobal } from '../sse.js';
 import { getSettings, updateSettings } from '../settings.js';
 import scheduler from '../scheduler.js';
-import { sendDiscordTest } from '../notify.js';
+import { sendTest } from '../notify.js';
 import { getChangelog } from '../changelog.js';
-import { isSafeWebhookUrl } from '../urlguard.js';
+import { isValidNotifyUrl } from '../urlguard.js';
 import * as db from '../db.js';
 
 export const apiRouter = express.Router();
+
+// App version, read once from package.json for the About panel / status.
+const APP_VERSION = (() => {
+  try {
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    return JSON.parse(readFileSync(path.join(dir, '..', '..', 'package.json'), 'utf8')).version || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
+
+// App status: version + last check summary (for "last checked" + error count).
+apiRouter.get('/api/status', (req, res) => {
+  return res.status(200).json({ version: APP_VERSION, lastCheck: db.getMeta('lastCheck') });
+});
 
 /**
  * Coerces a query param to a non-negative integer, falling back to
@@ -46,11 +64,16 @@ apiRouter.get('/api/containers', async (req, res) => {
     return res.status(503).json({ error: 'docker_unavailable' });
   }
 
+  const lastCheck = db.getMeta('lastCheck');
+  const errorByRef = new Map((lastCheck?.errored || []).map((e) => [e.ref, e.message]));
+
   const { items, refsToResolve } = buildContainerItems({
     containers,
     lookupEvent: db.latestUnresolvedEventForRef,
     isPinned: (ref) => db.isPinned(ref),
     lookupVersion: (digest) => db.getImageVersion(digest),
+    getRollback: (name) => db.getRollbackPoint(name),
+    getCheckError: (ref) => errorByRef.get(ref) || null,
   });
 
   for (const ref of refsToResolve) {
@@ -156,28 +179,28 @@ apiRouter.put('/api/settings', (req, res) => {
 
 // Send a test Discord message to the configured (or supplied) webhook URL.
 apiRouter.post('/api/notify/test', async (req, res) => {
-  const url =
-    (typeof req.body?.url === 'string' && req.body.url.trim()) || getSettings().discordWebhookUrl;
+  const settings = getSettings();
+  const url = (typeof req.body?.url === 'string' && req.body.url.trim()) || settings.discordWebhookUrl;
+  const type =
+    (typeof req.body?.type === 'string' && req.body.type) || settings.notifyType || 'discord';
   if (!url) {
-    return res.status(400).json({ error: 'no_webhook', message: 'No Discord webhook URL configured.' });
+    return res.status(400).json({ error: 'no_webhook', message: 'No notification URL configured.' });
   }
-  // SSRF guard: only allow an https webhook to a public host (also enforced at
-  // send time, but reject early with a clear message here).
-  if (!isSafeWebhookUrl(url)) {
+  if (!isValidNotifyUrl(url)) {
     return res
       .status(400)
-      .json({ error: 'invalid_webhook', message: 'Webhook must be an https URL to a public host.' });
+      .json({ error: 'invalid_webhook', message: 'Notification URL must be a valid http(s) URL.' });
   }
   try {
-    const result = await sendDiscordTest(url);
+    const result = await sendTest(type, url);
     if (result.ok) return res.status(200).json({ ok: true });
     return res.status(502).json({ error: 'webhook_failed', status: result.status });
   } catch (err) {
     console.error(`api.js: POST /api/notify/test failed: ${err.message}`);
-    if (err.code === 'unsafe_url') {
+    if (err.code === 'invalid_url') {
       return res
         .status(400)
-        .json({ error: 'invalid_webhook', message: 'Webhook must be an https URL to a public host.' });
+        .json({ error: 'invalid_webhook', message: 'Notification URL must be a valid http(s) URL.' });
     }
     return res.status(502).json({ error: 'webhook_failed' });
   }

@@ -65,6 +65,24 @@ function isPrivateIpv6(ip) {
   return false;
 }
 
+/**
+ * Validate a notification target URL: a well-formed http(s) URL with a host.
+ * Unlike `isSafeWebhookUrl`, this intentionally ALLOWS private/LAN hosts — a
+ * self-hosted ntfy/Gotify/webhook on your network is a normal, deliberate
+ * target, and this field is admin-only (behind login).
+ */
+export function isValidNotifyUrl(value) {
+  if (typeof value !== 'string') return false;
+  let url;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+  return Boolean(url.hostname);
+}
+
 /** Synchronous, network-free safety check. Requires https. */
 export function isSafeWebhookUrl(value) {
   if (typeof value !== 'string') return false;
@@ -113,4 +131,4 @@ export async function assertPublicWebhookUrl(value) {
   }
 }
 
-export default { isPrivateIp, isSafeWebhookUrl, assertPublicWebhookUrl };
+export default { isPrivateIp, isSafeWebhookUrl, assertPublicWebhookUrl, isValidNotifyUrl };

@@ -3,6 +3,7 @@ import { pin, unpin, getChangelog } from '../api.js';
 import { useUpdateRunner } from '../hooks/useUpdateRunner.js';
 import StatusMessage from './StatusMessage.jsx';
 import StreamLog from './StreamLog.jsx';
+import ConfirmDialog from './ConfirmDialog.jsx';
 
 function shortDigest(digest) {
   if (!digest) return '—';
@@ -137,18 +138,19 @@ function ChangelogContent({ data }) {
  *  - registerRunner(name, runFn) — handle for "Update all"
  */
 export default function UpdateCard({ container, onSettled, onPinChange, registerRunner }) {
-  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, pinned, sourceUrl } =
+  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, pinned, sourceUrl, canRevert, rollbackVersion, checkError } =
     container;
 
   const [pinBusy, setPinBusy] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [confirmRevert, setConfirmRevert] = useState(false);
 
   const [clOpen, setClOpen] = useState(false);
   const [clLoading, setClLoading] = useState(false);
   const [clData, setClData] = useState(null);
   const [clError, setClError] = useState('');
 
-  const { run, busy, startError, status, lines } = useUpdateRunner(name, onSettled);
+  const { run, revert, busy, startError, status, lines } = useUpdateRunner(name, onSettled);
 
   useEffect(() => {
     if (registerRunner) registerRunner(name, run);
@@ -161,6 +163,12 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
     if (busy) return;
     run();
   }, [busy, run]);
+
+  const handleRevert = useCallback(() => {
+    setConfirmRevert(false);
+    if (busy) return;
+    revert();
+  }, [busy, revert]);
 
   const togglePin = useCallback(async () => {
     setPinBusy(true);
@@ -248,6 +256,11 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
         )}
       </div>
 
+      {checkError && (
+        <p className="card-check-error" title={checkError}>
+          ⚠ Couldn't check for updates (e.g. private registry or rate limit).
+        </p>
+      )}
       {actionError && <StatusMessage type="error" message={actionError} />}
       {startError && <StatusMessage type="error" message={startError} />}
       <StatusMessage type={status.type} message={status.message} />
@@ -265,6 +278,17 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
               {clOpen ? 'Hide changes' : showUpdateAvailable ? "What's changed" : 'Release notes'}
             </button>
           )}
+          {canRevert && (
+            <button
+              type="button"
+              className="btn-ghost btn-ghost-danger"
+              onClick={() => setConfirmRevert(true)}
+              disabled={busy}
+              title={rollbackVersion ? `Revert to ${rollbackVersion}` : 'Revert to the previous image'}
+            >
+              Revert{rollbackVersion ? ` to ${rollbackVersion}` : ''}
+            </button>
+          )}
         </div>
         <button
           type="button"
@@ -276,6 +300,18 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
           {busy ? 'Updating…' : 'Update'}
         </button>
       </div>
+
+      {confirmRevert && (
+        <ConfirmDialog
+          title="Revert to the previous image?"
+          message={`This recreates "${name}" from the image it ran before the last update${
+            rollbackVersion ? ` (${rollbackVersion})` : ''
+          }. Tip: pin the version afterwards, or your next compose update will pull the newer image again.`}
+          confirmLabel="Revert"
+          onConfirm={handleRevert}
+          onCancel={() => setConfirmRevert(false)}
+        />
+      )}
 
       {clOpen && (
         <div className="changelog-panel">

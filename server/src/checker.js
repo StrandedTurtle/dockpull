@@ -71,6 +71,7 @@ export async function runCheck() {
   let checked = 0;
   let updatesFound = 0;
   let errors = 0;
+  const errored = []; // { ref, image, message } per failed container check
 
   let idx = 0;
   async function worker() {
@@ -132,6 +133,7 @@ export async function runCheck() {
         updatesFound += 1;
       } catch (err) {
         errors += 1;
+        errored.push({ ref: c.normalizedRef, image: c.image, message: err.message });
         console.warn(`checker: failed to check ${c.image}: ${err.message}`);
       }
     }
@@ -140,6 +142,13 @@ export async function runCheck() {
   await Promise.all(
     Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker())
   );
+
+  const summary = { at: Date.now(), total: items.length, checked, updatesFound, errors, errored };
+  try {
+    db.setMeta('lastCheck', summary);
+  } catch {
+    // metadata persistence is best-effort; never fail a check over it.
+  }
 
   return { total: items.length, checked, updatesFound, errors };
 }

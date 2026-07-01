@@ -450,6 +450,70 @@ async function currentDigestForContainerName(name) {
   return resolveCurrentDigest(inspectData.Image, image);
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Poll a container after an update to confirm it actually comes up, so we don't
+ * report a green "updated" for an image that immediately crash-loops. Returns
+ * as soon as the state is decisive; gives up (unhealthy) after `timeoutMs`.
+ *
+ * @param {string} name
+ * @returns {Promise<{ healthy: boolean, state: string, health: string|null, timedOut?: boolean }>}
+ */
+export async function verifyContainerHealth(name, { timeoutMs = 30000, intervalMs = 2000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let state = 'unknown';
+  let health = null;
+  for (;;) {
+    let data;
+    try {
+      data = await docker.getContainer(name).inspect();
+    } catch {
+      return { healthy: false, state: 'missing', health: null };
+    }
+    state = data.State?.Status || 'unknown';
+    health = data.State?.Health?.Status || null; // healthy|unhealthy|starting|null
+    if (state === 'running') {
+      if (!health || health === 'healthy') return { healthy: true, state, health };
+      if (health === 'unhealthy') return { healthy: false, state, health };
+      // 'starting' — healthcheck still warming up; keep waiting.
+    } else if (state === 'exited' || state === 'dead') {
+      return { healthy: false, state, health };
+    }
+    // restarting / created / paused — keep polling until decisive or timeout.
+    if (Date.now() >= deadline) return { healthy: false, state, health, timedOut: true };
+    await sleep(intervalMs);
+  }
+}
+
+/** Human phrase for an unhealthy verification result. */
+function describeUnhealthy(h) {
+  if (h.state === 'missing') return 'the container disappeared';
+  if (h.health === 'unhealthy') return 'its healthcheck is failing';
+  if (h.state === 'restarting') return 'it keeps restarting (likely a crash loop)';
+  if (h.state === 'exited' || h.state === 'dead') return 'it exited right after starting';
+  if (h.timedOut) return `it didn't become healthy in time (state: ${h.state}${h.health ? `/${h.health}` : ''})`;
+  return `it isn't running (state: ${h.state})`;
+}
+
+/**
+ * Wrap a successful update result with a post-update health check. If the
+ * container doesn't come up healthy, downgrade to a failure with an actionable
+ * message (the new image is recorded so the user can revert).
+ */
+async function withHealthCheck(name, result, expectRunning) {
+  if (!result.success || !expectRunning) return result;
+  const h = await verifyContainerHealth(name);
+  if (h.healthy) return { ...result, healthy: true, healthState: h.state };
+  return {
+    ...result,
+    success: false,
+    healthy: false,
+    healthState: h.state,
+    message: `Image updated, but ${describeUnhealthy(h)}. The new version may be broken — check the logs, or revert to the previous version.`,
+  };
+}
+
 /**
  * Updates a container: prefers compose-based update (pull + up -d via the
  * `docker compose` CLI) when compose labels are present; otherwise falls
@@ -478,6 +542,9 @@ export async function updateContainer(name, onLine) {
 
   const image = inspectData.Config?.Image;
   const oldDigest = image ? await resolveCurrentDigest(inspectData.Image, image) : null;
+  // Local image ID of what's running now, so a later revert can recreate the
+  // container from this exact (working) image without pulling.
+  const oldImageId = inspectData.Image || null;
   const composeInfo = await getComposeInfo(inspectData);
 
   const isComposeManaged = Boolean(composeInfo?.composeFile && composeInfo?.service);
@@ -552,12 +619,11 @@ export async function updateContainer(name, onLine) {
     }
 
     const newDigest = await currentDigestForContainerName(name);
-    return {
-      success: true,
-      message: 'Updated successfully via docker compose.',
-      oldDigest,
-      newDigest,
-    };
+    return withHealthCheck(
+      name,
+      { success: true, message: 'Updated successfully via docker compose.', oldDigest, newDigest, oldImageId },
+      true
+    );
   }
 
   // Standalone fallback: docker pull + recreate via dockerode, preserving
@@ -639,12 +705,80 @@ export async function updateContainer(name, onLine) {
   }
 
   const newDigest = await currentDigestForContainerName(name);
-  return {
-    success: true,
-    message: 'Updated successfully via standalone docker pull + recreate.',
-    oldDigest,
-    newDigest,
-  };
+  return withHealthCheck(
+    name,
+    {
+      success: true,
+      message: 'Updated successfully via standalone docker pull + recreate.',
+      oldDigest,
+      newDigest,
+      oldImageId,
+    },
+    wasRunning
+  );
+}
+
+/**
+ * Revert a container to a previous local image by ID: recreate it from that
+ * image (no pull), preserving its config/host config/networks, and start it.
+ * Works for both compose- and standalone-managed containers (it manipulates
+ * the container directly). The container is left off its compose-tracked tag,
+ * so a later `docker compose up` will move it forward again — callers should
+ * tell the user to pin the version until they're ready.
+ *
+ * @param {string} name
+ * @param {string} imageId - local image ID/ref to recreate from.
+ * @param {(line: string, stream: 'stdout'|'stderr') => void} [onLine]
+ * @returns {Promise<{ success: boolean, message: string, oldDigest: string|null, newDigest: string|null }>}
+ */
+export async function revertContainer(name, imageId, onLine) {
+  const log = (line) => onLine && onLine(line, 'stdout');
+  let inspectData;
+  try {
+    inspectData = await docker.getContainer(name).inspect();
+  } catch (err) {
+    return { success: false, message: `Container "${name}" not found: ${err.message}`, oldDigest: null, newDigest: null };
+  }
+
+  const oldDigest = await currentDigestForContainerName(name);
+  const wasRunning = inspectData.State?.Running === true;
+
+  try {
+    log(`Reverting "${name}" to the previous image…`);
+    const container = docker.getContainer(name);
+    if (wasRunning) await container.stop();
+    await container.remove();
+
+    const created = await docker.createContainer({
+      name,
+      Image: imageId,
+      Cmd: inspectData.Config.Cmd,
+      Entrypoint: inspectData.Config.Entrypoint,
+      Env: inspectData.Config.Env,
+      Labels: inspectData.Config.Labels,
+      ExposedPorts: inspectData.Config.ExposedPorts,
+      Volumes: inspectData.Config.Volumes,
+      WorkingDir: inspectData.Config.WorkingDir,
+      User: inspectData.Config.User,
+      Tty: inspectData.Config.Tty,
+      OpenStdin: inspectData.Config.OpenStdin,
+      StopSignal: inspectData.Config.StopSignal,
+      StopTimeout: inspectData.Config.StopTimeout,
+      HostConfig: inspectData.HostConfig,
+      NetworkingConfig: { EndpointsConfig: inspectData.NetworkSettings?.Networks },
+    });
+    await created.start();
+    log('Container recreated from the previous image.');
+  } catch (err) {
+    return { success: false, message: `Failed to revert container: ${err.message}`, oldDigest, newDigest: null };
+  }
+
+  const newDigest = await currentDigestForContainerName(name);
+  const health = await verifyContainerHealth(name);
+  if (!health.healthy) {
+    return { success: false, message: `Reverted, but ${describeUnhealthy(health)}.`, oldDigest, newDigest };
+  }
+  return { success: true, message: 'Reverted to the previous image.', oldDigest, newDigest };
 }
 
 /**

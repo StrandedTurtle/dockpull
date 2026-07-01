@@ -2,7 +2,12 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
+// Optional path prefix for serving under a subpath (e.g. BASE_PATH=/dockpull/).
+// Defaults to '/'. Set at build time; the prebuilt image ships with '/'.
+const base = process.env.BASE_PATH || '/';
+
 export default defineConfig({
+  base,
   plugins: [
     react(),
     VitePWA({
@@ -14,8 +19,8 @@ export default defineConfig({
         theme_color: '#0f1117',
         background_color: '#0f1117',
         display: 'standalone',
-        start_url: '/',
-        scope: '/',
+        start_url: base,
+        scope: base,
         icons: [
           {
             src: '/icon-192.png',

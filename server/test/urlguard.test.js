@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isPrivateIp, isSafeWebhookUrl, assertPublicWebhookUrl } from '../src/urlguard.js';
+import { isPrivateIp, isSafeWebhookUrl, assertPublicWebhookUrl, isValidNotifyUrl } from '../src/urlguard.js';
 
 test('isPrivateIp: classifies IPv4 ranges', () => {
   for (const ip of ['127.0.0.1', '10.0.0.5', '192.168.1.10', '172.16.0.1', '172.31.255.255', '169.254.169.254', '0.0.0.0', '100.64.0.1']) {
@@ -37,6 +37,18 @@ test('isSafeWebhookUrl: requires https + public host', () => {
   assert.equal(isSafeWebhookUrl('not-a-url'), false);
   assert.equal(isSafeWebhookUrl(''), false);
   assert.equal(isSafeWebhookUrl(null), false);
+});
+
+test('isValidNotifyUrl: accepts http(s) incl. LAN hosts, rejects junk', () => {
+  assert.equal(isValidNotifyUrl('https://discord.com/api/webhooks/1/abc'), true);
+  assert.equal(isValidNotifyUrl('https://ntfy.sh/my-topic'), true);
+  // LAN / private targets are allowed on purpose (self-hosted ntfy/gotify).
+  assert.equal(isValidNotifyUrl('http://192.168.1.50/message?token=x'), true);
+  assert.equal(isValidNotifyUrl('http://gotify.local/'), true);
+  assert.equal(isValidNotifyUrl('ftp://example.com'), false);
+  assert.equal(isValidNotifyUrl('not-a-url'), false);
+  assert.equal(isValidNotifyUrl(''), false);
+  assert.equal(isValidNotifyUrl(null), false);
 });
 
 test('assertPublicWebhookUrl: throws unsafe_url for internal, resolves IP literals', async () => {

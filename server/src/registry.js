@@ -10,6 +10,7 @@
  */
 
 import { parseRef } from './reconcile.js';
+import { basicAuthForRegistry } from './registry-auth.js';
 
 const DOCKER_HUB_API_HOST = 'registry-1.docker.io';
 
@@ -45,18 +46,40 @@ export function parseWwwAuthenticate(header) {
   return params;
 }
 
-async function fetchToken(wwwAuth, repository, timeoutMs) {
+async function fetchToken(wwwAuth, repository, timeoutMs, basicAuth) {
   if (!wwwAuth.realm) return null;
   const url = new URL(wwwAuth.realm);
   if (wwwAuth.service) url.searchParams.set('service', wwwAuth.service);
   url.searchParams.set('scope', wwwAuth.scope || `repository:${repository}:pull`);
   const res = await fetch(url, {
-    headers: { Accept: 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      // Authenticate the token request when we have creds, so the registry
+      // grants pull scope for private repos (and a higher Docker Hub limit).
+      ...(basicAuth ? { Authorization: `Basic ${basicAuth}` } : {}),
+    },
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) return null;
   const body = await res.json().catch(() => null);
   return body?.token || body?.access_token || null;
+}
+
+/**
+ * Resolve the `Authorization` header to use for registry requests after an
+ * initial 401: a Bearer token (standard token flow, authenticated with our
+ * Basic creds when available) or, for registries that want HTTP Basic directly,
+ * the Basic header itself. Returns null if no auth could be established.
+ */
+async function resolveAuthHeader(res401, registry, repository, timeoutMs) {
+  const basicAuth = basicAuthForRegistry(registry);
+  const wwwAuth = parseWwwAuthenticate(res401.headers.get('www-authenticate'));
+  if (wwwAuth?.realm) {
+    const token = await fetchToken(wwwAuth, repository, timeoutMs, basicAuth);
+    if (token) return `Bearer ${token}`;
+  }
+  if (basicAuth) return `Basic ${basicAuth}`;
+  return null;
 }
 
 /**
@@ -75,25 +98,23 @@ export async function getRemoteDigest(imageRef, { timeoutMs = 10000 } = {}) {
   const host = apiHost(registry);
   const manifestUrl = `https://${host}/v2/${repository}/manifests/${encodeURIComponent(tag)}`;
 
-  const headManifest = (token) =>
+  const headManifest = (authHeader) =>
     fetch(manifestUrl, {
       method: 'HEAD',
       headers: {
         Accept: MANIFEST_ACCEPT,
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(authHeader ? { Authorization: authHeader } : {}),
       },
       signal: AbortSignal.timeout(timeoutMs),
     });
 
   let res = await headManifest(null);
 
-  // Standard token handshake: on 401, read the realm/scope and retry.
+  // On 401, establish auth (token flow, or HTTP Basic for private registries)
+  // using any configured Docker credentials, then retry.
   if (res.status === 401) {
-    const wwwAuth = parseWwwAuthenticate(res.headers.get('www-authenticate'));
-    if (wwwAuth) {
-      const token = await fetchToken(wwwAuth, repository, timeoutMs);
-      if (token) res = await headManifest(token);
-    }
+    const authHeader = await resolveAuthHeader(res, registry, repository, timeoutMs);
+    if (authHeader) res = await headManifest(authHeader);
   }
 
   if (!res.ok) {
@@ -121,11 +142,11 @@ export function pickPlatformManifest(manifests) {
   );
 }
 
-async function authedJson(url, token, timeoutMs) {
+async function authedJson(url, authHeader, timeoutMs) {
   const res = await fetch(url, {
     headers: {
       Accept: MANIFEST_ACCEPT,
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(authHeader ? { Authorization: authHeader } : {}),
     },
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -155,21 +176,18 @@ export async function getRemoteVersion(imageRef, { timeoutMs = 10000 } = {}) {
     const host = apiHost(registry);
     const manifestUrl = `https://${host}/v2/${repository}/manifests/${encodeURIComponent(tag)}`;
 
-    let token = null;
+    let authHeader = null;
     let res = await fetch(manifestUrl, {
       headers: { Accept: MANIFEST_ACCEPT },
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (res.status === 401) {
-      const wwwAuth = parseWwwAuthenticate(res.headers.get('www-authenticate'));
-      if (wwwAuth) {
-        token = await fetchToken(wwwAuth, repository, timeoutMs);
-        if (token) {
-          res = await fetch(manifestUrl, {
-            headers: { Accept: MANIFEST_ACCEPT, Authorization: `Bearer ${token}` },
-            signal: AbortSignal.timeout(timeoutMs),
-          });
-        }
+      authHeader = await resolveAuthHeader(res, registry, repository, timeoutMs);
+      if (authHeader) {
+        res = await fetch(manifestUrl, {
+          headers: { Accept: MANIFEST_ACCEPT, Authorization: authHeader },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
       }
     }
     if (!res.ok) return null;
@@ -181,7 +199,7 @@ export async function getRemoteVersion(imageRef, { timeoutMs = 10000 } = {}) {
       const picked = pickPlatformManifest(manifest.manifests);
       if (!picked?.digest) return null;
       const subUrl = `https://${host}/v2/${repository}/manifests/${picked.digest}`;
-      imageManifest = await authedJson(subUrl, token, timeoutMs);
+      imageManifest = await authedJson(subUrl, authHeader, timeoutMs);
       if (!imageManifest) return null;
     }
 
@@ -190,7 +208,7 @@ export async function getRemoteVersion(imageRef, { timeoutMs = 10000 } = {}) {
 
     const blobUrl = `https://${host}/v2/${repository}/blobs/${configDigest}`;
     const blobRes = await fetch(blobUrl, {
-      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: { ...(authHeader ? { Authorization: authHeader } : {}) },
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!blobRes.ok) return null;

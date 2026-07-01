@@ -14,7 +14,7 @@
  */
 
 import express from 'express';
-import { docker, updateContainer } from '../docker.js';
+import { docker, updateContainer, revertContainer } from '../docker.js';
 import { normalizeRef } from '../reconcile.js';
 import * as sse from '../sse.js';
 import * as db from '../db.js';
@@ -52,6 +52,18 @@ async function runUpdate(name, image) {
       } catch {
         // normalizeRef shouldn't throw for a real image ref; non-fatal.
       }
+    }
+    // Remember how to undo this update (the previous local image) whenever the
+    // image actually changed — even on a health-downgraded "failure", so the
+    // user can revert a broken update.
+    if (result.oldImageId && result.newDigest && result.oldDigest && result.newDigest !== result.oldDigest) {
+      db.setRollbackPoint({
+        container_name: name,
+        image_id: result.oldImageId,
+        image_ref: image,
+        old_digest: result.oldDigest,
+        old_version: db.getImageVersion(result.oldDigest),
+      });
     }
     sse.finish(name, { success: result.success, message: result.message });
   } catch (err) {
@@ -96,6 +108,71 @@ updateRouter.post('/api/update/:name', async (req, res) => {
   // Fire-and-forget: don't await, so the POST returns promptly. runUpdate
   // catches its own errors, so this can never reject/crash the process.
   void runUpdate(name, image);
+
+  return res.status(200).json({ streamId: name });
+});
+
+/**
+ * Detached revert: recreate the container from its remembered previous image,
+ * record history, and finish the SSE session. Mirrors runUpdate.
+ */
+async function runRevert(name, image, imageId) {
+  try {
+    const result = await revertContainer(name, imageId, (line, stream) => sse.pushLog(name, line, stream));
+    db.recordUpdate({
+      container_name: name,
+      image,
+      old_digest: result.oldDigest,
+      new_digest: result.newDigest,
+      status: result.success ? 'success' : 'failure',
+      message: result.message,
+    });
+    // Consume the rollback point on a successful revert (can't revert twice to
+    // the same image). The update it reverted away from will simply be
+    // re-detected as available on the next check.
+    if (result.success) db.deleteRollbackPoint(name);
+    sse.finish(name, { success: result.success, message: result.message });
+  } catch (err) {
+    db.recordUpdate({
+      container_name: name,
+      image,
+      old_digest: null,
+      new_digest: null,
+      status: 'failure',
+      message: err.message,
+    });
+    sse.finish(name, { success: false, message: err.message });
+  } finally {
+    sse.broadcastGlobal({ type: 'containers-changed' });
+  }
+}
+
+updateRouter.post('/api/update/:name/revert', async (req, res) => {
+  const { name } = req.params;
+
+  const rollback = db.getRollbackPoint(name);
+  if (!rollback) {
+    return res.status(404).json({ error: 'no_rollback' });
+  }
+
+  let inspectData;
+  try {
+    inspectData = await docker.getContainer(name).inspect();
+  } catch (err) {
+    if (err.statusCode === 404) return res.status(404).json({ error: 'not_found' });
+    if (err.code === 'ENOENT' || err.code === 'ECONNREFUSED') {
+      return res.status(503).json({ error: 'docker_unavailable' });
+    }
+    return res.status(500).json({ error: 'internal_error' });
+  }
+
+  if (sse.isActive(name)) {
+    return res.status(409).json({ error: 'update_in_progress' });
+  }
+
+  sse.startSession(name);
+  const image = inspectData.Config?.Image ?? rollback.image_ref ?? null;
+  void runRevert(name, image, rollback.image_id);
 
   return res.status(200).json({ streamId: name });
 });

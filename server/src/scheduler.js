@@ -14,7 +14,7 @@ import { runCheck } from './checker.js';
 import { listContainers } from './docker.js';
 import { buildContainerItems } from './containers-service.js';
 import { normalizeRef } from './reconcile.js';
-import { sendDiscordUpdates } from './notify.js';
+import { sendUpdates } from './notify.js';
 import * as db from './db.js';
 
 let timer = null;
@@ -87,7 +87,7 @@ export async function runScheduledCheck() {
   const { toNotify, hasNew } = selectNotifyTargets(items, unnotified, normalizeRef);
   if (toNotify.length === 0 || !hasNew) return;
 
-  const result = await sendDiscordUpdates(settings.discordWebhookUrl, toNotify);
+  const result = await sendUpdates(settings.notifyType, settings.discordWebhookUrl, toNotify);
   if (result.ok) {
     db.markRefsNotified(toNotify.map((i) => normalizeRef(i.image)));
   } else {

@@ -15,6 +15,14 @@ function envInt(name, fallback) {
  * `true`. A bare integer → that hop count. Anything else (e.g. a subnet) is
  * passed through verbatim.
  */
+/** Normalize a subpath to "" (root) or "/prefix" (leading slash, no trailing). */
+function normalizeBasePath(raw) {
+  if (!raw || raw === '/') return '';
+  let p = String(raw).trim();
+  if (!p.startsWith('/')) p = `/${p}`;
+  return p.replace(/\/+$/, '');
+}
+
 function parseTrustProxy(raw) {
   if (raw === undefined || raw === '') return false;
   const v = String(raw).trim().toLowerCase();
@@ -37,6 +45,10 @@ export const config = {
   // can't try to update (and kill) itself. Defaults to the container_name
   // used in the shipped docker-compose.yml; override if you rename it.
   SELF_CONTAINER_NAME: process.env.SELF_CONTAINER_NAME || 'dockpull',
+  // Subpath the app is served under (e.g. "/dockpull") when behind a reverse
+  // proxy that does NOT strip the prefix. Normalized to "" (root) or
+  // "/prefix" (no trailing slash). Build the client with the same BASE_PATH.
+  BASE_PATH: normalizeBasePath(process.env.BASE_PATH),
   // Express `trust proxy` setting. Leave unset/false when the app is exposed
   // directly. Set it when behind a reverse proxy (nginx, Traefik, Cloudflare)
   // so `req.ip` (used for login rate-limiting) reflects the real client and

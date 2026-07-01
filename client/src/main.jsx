@@ -16,9 +16,12 @@ import './styles/app.css';
   }
 })();
 
+// Honour a build-time subpath (Vite `base`) so routing works under a prefix.
+const basename = import.meta.env.BASE_URL.replace(/\/$/, '');
+
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={basename || undefined}>
       <App />
     </BrowserRouter>
   </React.StrictMode>

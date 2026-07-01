@@ -45,6 +45,18 @@ CREATE TABLE IF NOT EXISTS image_versions (
   version TEXT NOT NULL,
   updated_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS app_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
+CREATE TABLE IF NOT EXISTS rollback_points (
+  container_name TEXT PRIMARY KEY,
+  image_id TEXT NOT NULL,
+  image_ref TEXT,
+  old_digest TEXT,
+  old_version TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
 CREATE INDEX IF NOT EXISTS idx_events_ref ON update_events(normalized_ref, resolved);
 CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC);
 `);
@@ -87,6 +99,29 @@ const stmts = {
   `),
   getImageVersion: db.prepare(`
     SELECT version FROM image_versions WHERE digest = ? LIMIT 1
+  `),
+  setMeta: db.prepare(`
+    INSERT INTO app_meta (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `),
+  getMeta: db.prepare(`
+    SELECT value FROM app_meta WHERE key = ? LIMIT 1
+  `),
+  setRollbackPoint: db.prepare(`
+    INSERT INTO rollback_points (container_name, image_id, image_ref, old_digest, old_version, created_at)
+    VALUES (@container_name, @image_id, @image_ref, @old_digest, @old_version, datetime('now'))
+    ON CONFLICT(container_name) DO UPDATE SET
+      image_id = excluded.image_id,
+      image_ref = excluded.image_ref,
+      old_digest = excluded.old_digest,
+      old_version = excluded.old_version,
+      created_at = excluded.created_at
+  `),
+  getRollbackPoint: db.prepare(`
+    SELECT * FROM rollback_points WHERE container_name = ? LIMIT 1
+  `),
+  deleteRollbackPoint: db.prepare(`
+    DELETE FROM rollback_points WHERE container_name = ?
   `),
   recordUpdate: db.prepare(`
     INSERT INTO update_history (container_name, image, old_digest, new_digest, status, message)
@@ -174,6 +209,39 @@ export function getImageVersion(digest) {
   if (!digest) return null;
   const row = stmts.getImageVersion.get(digest);
   return row ? row.version : null;
+}
+
+/** Small key/value JSON store for app-level metadata (e.g. last check status). */
+export function setMeta(key, value) {
+  return stmts.setMeta.run(key, JSON.stringify(value));
+}
+
+export function getMeta(key) {
+  const row = stmts.getMeta.get(key);
+  if (!row) return null;
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remember how to undo the most recent update of a container (the previous
+ * local image ID + what it was), so the dashboard can offer a one-click revert.
+ */
+export function setRollbackPoint({ container_name, image_id, image_ref = null, old_digest = null, old_version = null }) {
+  if (!container_name || !image_id) return undefined;
+  return stmts.setRollbackPoint.run({ container_name, image_id, image_ref, old_digest, old_version });
+}
+
+export function getRollbackPoint(container_name) {
+  if (!container_name) return null;
+  return stmts.getRollbackPoint.get(container_name) || null;
+}
+
+export function deleteRollbackPoint(container_name) {
+  return stmts.deleteRollbackPoint.run(container_name);
 }
 
 export function recordUpdate({ container_name, image, old_digest, new_digest, status, message }) {

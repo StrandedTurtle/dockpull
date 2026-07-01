@@ -10,7 +10,8 @@
  */
 
 import * as db from './db.js';
-import { isSafeWebhookUrl } from './urlguard.js';
+import { isValidNotifyUrl } from './urlguard.js';
+import { NOTIFY_TYPES } from './notify.js';
 
 function bool(v, fallback) {
   if (v === undefined || v === null) return fallback;
@@ -30,11 +31,12 @@ function timeOrUndef(v) {
   return isValidTime(v) ? v.trim() : undefined;
 }
 
-// Accept an empty string (clears the webhook) or an https URL whose host isn't
-// internal — blocks SSRF via private/loopback/metadata addresses.
+// Accept an empty string (clears the target) or a valid http(s) URL. Internal/
+// LAN hosts are allowed on purpose — a self-hosted ntfy/Gotify is a normal
+// target and this field is admin-only.
 function urlOrUndef(v) {
   if (v === '') return '';
-  if (typeof v === 'string' && isSafeWebhookUrl(v)) return v.trim();
+  if (typeof v === 'string' && isValidNotifyUrl(v)) return v.trim();
   return undefined;
 }
 
@@ -44,6 +46,9 @@ const ENV_TIME = isValidTime(process.env.SCHEDULED_CHECK_TIME)
   ? process.env.SCHEDULED_CHECK_TIME.trim()
   : '09:00';
 const ENV_BG_ENABLED = bool(process.env.BACKGROUND_CHECK_ENABLED, true);
+const ENV_NOTIFY_TYPE = NOTIFY_TYPES.includes(process.env.NOTIFY_TYPE)
+  ? process.env.NOTIFY_TYPE
+  : 'discord';
 
 const SPEC = {
   defaultFilter: {
@@ -67,15 +72,23 @@ const SPEC = {
     fromStore: (v) => (isValidTime(v) ? v.trim() : ENV_TIME),
     fromInput: timeOrUndef,
   },
+  // Master "send notifications" toggle (kept this key for back-compat).
   discordEnabled: {
     default: ENV_WEBHOOK !== '',
     fromStore: (v) => bool(v, ENV_WEBHOOK !== ''),
     fromInput: (v) => (typeof v === 'boolean' ? v : undefined),
   },
+  // Notification target URL (used for whichever notifyType is selected; key
+  // kept as discordWebhookUrl for back-compat with stored settings).
   discordWebhookUrl: {
     default: ENV_WEBHOOK,
     fromStore: (v) => (typeof v === 'string' ? v : ENV_WEBHOOK),
     fromInput: urlOrUndef,
+  },
+  notifyType: {
+    default: ENV_NOTIFY_TYPE,
+    fromStore: enumOf(NOTIFY_TYPES, ENV_NOTIFY_TYPE),
+    fromInput: enumOf(NOTIFY_TYPES, undefined),
   },
 };
 

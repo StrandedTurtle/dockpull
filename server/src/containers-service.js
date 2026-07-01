@@ -31,7 +31,14 @@ import { isMeaningfulVersion } from './version.js';
  *   refsToResolve: string[]
  * }}
  */
-export function buildContainerItems({ containers, lookupEvent, isPinned, lookupVersion = () => null }) {
+export function buildContainerItems({
+  containers,
+  lookupEvent,
+  isPinned,
+  lookupVersion = () => null,
+  getRollback = () => null,
+  getCheckError = () => null,
+}) {
   const items = [];
   const refsToResolve = [];
 
@@ -65,6 +72,8 @@ export function buildContainerItems({ containers, lookupEvent, isPinned, lookupV
       availableVersion = lookupVersion(availableDigest) ?? availableVersion ?? null;
     }
 
+    const rollback = getRollback(c.name);
+
     items.push({
       name: c.name,
       project: c.project,
@@ -78,6 +87,9 @@ export function buildContainerItems({ containers, lookupEvent, isPinned, lookupV
       availableDigest,
       availableVersion,
       pinned: isPinned(c.normalizedRef),
+      canRevert: !!rollback,
+      rollbackVersion: rollback?.old_version ?? null,
+      checkError: getCheckError(c.normalizedRef),
       state: c.state,
       composeFile: c.composeFile,
       composeFileMissing: c.composeFileMissing ?? false,
