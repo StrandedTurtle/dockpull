@@ -45,6 +45,8 @@ docker build -f server/Dockerfile -t dockpull .
 
 ## Images / releases
 
-`:edge` is published from `main`. Cutting a release tag
-(`git tag v0.1.0 && git push origin v0.1.0`) publishes the multi-arch
-(`linux/amd64` + `linux/arm64`) image as `:latest` and semver tags.
+`:latest` is published from every push to `main` (multi-arch: `linux/amd64` +
+`linux/arm64`). Cutting a version tag (`git tag v1.2.0 && git push origin v1.2.0`)
+publishes pinned `:1.2.0` / `:1.2` images and creates a GitHub Release with
+auto-generated notes. Bump `version` in `server/package.json` +
+`client/package.json` (and their lockfiles) to match the tag.

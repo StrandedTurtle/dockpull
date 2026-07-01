@@ -1,5 +1,9 @@
 # DockPull
 
+[![CI](https://github.com/StrandedTurtle/dockpull/actions/workflows/ci.yml/badge.svg)](https://github.com/StrandedTurtle/dockpull/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/StrandedTurtle/dockpull?sort=semver)](https://github.com/StrandedTurtle/dockpull/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 A small, self-hosted, **mobile-first** web UI for updating your `docker compose`
 containers (works great with [Dockge](https://github.com/louislam/dockge)). It
 checks your images' registries for newer versions and lets you apply updates
@@ -18,7 +22,7 @@ Drop this into a compose file on your Docker host and start it:
 ```yaml
 services:
   dockpull:
-    image: ghcr.io/strandedturtle/dockpull:edge
+    image: ghcr.io/strandedturtle/dockpull:latest
     container_name: dockpull
     restart: unless-stopped
     ports:
@@ -148,9 +152,9 @@ To update DockPull itself: `docker compose pull dockpull && docker compose up -d
   credentials; the anonymous check can't query them.
 - **Can't log in / cookie not sticking** → on HTTPS, set `BASE_URL` to your `https://`
   URL so the `Secure` cookie is issued; clear the cookie and retry.
-- **Image tags:** `:edge` tracks `main`; release tags also publish `:latest` and semver
-  (`:0.1.0`). If a host can't pull, the GHCR package may be private — make it public or
-  `docker login ghcr.io`.
+- **Image tags:** `:latest` tracks `main`; version tags (`:1.0.0`, `:1.0`) are cut per
+  release for pinning. If a host can't pull, the GHCR package may be private — make it
+  public or `docker login ghcr.io`.
 
 ---
 
