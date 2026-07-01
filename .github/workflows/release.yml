@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
       - name: Server tests
@@ -46,7 +46,7 @@ jobs:
 
       - name: Docker metadata (tags/labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ steps.img.outputs.name }}
           flavor: latest=false
@@ -66,7 +66,7 @@ jobs:
       - uses: docker/setup-qemu-action@v3
         with:
           image: tonistiigi/binfmt:qemu-v10.2.3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
