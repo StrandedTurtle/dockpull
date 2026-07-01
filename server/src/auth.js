@@ -27,12 +27,25 @@ const LOCKOUT_MS = 15 * 60 * 1000; // how long a lockout lasts once tripped
 
 const loginAttempts = new Map(); // ip -> { count, firstAt, lockedUntil }
 
+// Bound the map: once it grows past this, expired entries are swept on the
+// next recorded failure, so a wide scan from many IPs can't grow it forever.
+const MAX_TRACKED_IPS = 10000;
+
+function pruneLoginAttempts(now) {
+  for (const [ip, a] of loginAttempts) {
+    const windowExpired = now - a.firstAt > FAILURE_WINDOW_MS;
+    const lockoutExpired = !a.lockedUntil || a.lockedUntil <= now;
+    if (windowExpired && lockoutExpired) loginAttempts.delete(ip);
+  }
+}
+
 export function isLockedOut(ip, now = Date.now()) {
   const a = loginAttempts.get(ip);
   return Boolean(a && a.lockedUntil && a.lockedUntil > now);
 }
 
 export function recordLoginFailure(ip, now = Date.now()) {
+  if (loginAttempts.size >= MAX_TRACKED_IPS) pruneLoginAttempts(now);
   let a = loginAttempts.get(ip);
   if (!a || now - a.firstAt > FAILURE_WINDOW_MS) {
     a = { count: 0, firstAt: now, lockedUntil: 0 };
@@ -127,7 +140,8 @@ export function loginHandler(req, res) {
  * cookie that may not even be valid is harmless.
  */
 export function logoutHandler(req, res) {
-  res.clearCookie(SESSION_COOKIE, { path: '/' });
+  // Must match the path the cookie was set with, or the browser won't clear it.
+  res.clearCookie(SESSION_COOKIE, { path: config.BASE_PATH || '/' });
   return res.status(200).json({ ok: true });
 }
 

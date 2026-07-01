@@ -35,6 +35,11 @@ DockPull is built for a **trusted LAN / homelab** behind authentication. It is
 
 - **Keep it off the open internet.** Put it on your LAN, a VPN (WireGuard /
   Tailscale), or behind an authenticating reverse proxy / tunnel.
+- **Using a Cloudflare Tunnel?** That *is* internet exposure. Require a
+  [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
+  policy on the hostname (so visitors authenticate to Cloudflare before they
+  ever reach DockPull), and set `TRUST_PROXY=1` + `BASE_URL=https://…`. Don't
+  rely on the single app password as the only gate to a Docker-socket app.
 - **Use a strong `ADMIN_PASSWORD`** and a random `SESSION_SECRET`
   (`openssl rand -hex 32`).
 - **Serve it over HTTPS** (set `BASE_URL=https://…`) so the session cookie gets

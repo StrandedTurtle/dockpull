@@ -1,18 +1,21 @@
 /**
- * SSRF guards for the user-supplied Discord webhook URL.
+ * URL validation for the user-supplied notification target.
  *
- * The webhook URL is fetched server-side (scheduled notify + "send test"), so
- * an unrestricted URL would let an authenticated user probe the host's internal
- * network or cloud metadata endpoints. We defend in two layers:
+ * The active check is `isValidNotifyUrl`: a well-formed http(s) URL, with
+ * private/LAN hosts deliberately allowed — a self-hosted ntfy/Gotify on your
+ * network is a normal target, and the field is admin-only (behind login).
+ * See SECURITY.md ("Notification URL is admin-only").
+ *
+ * Two stricter guards are kept (tested, currently unused) in case a future
+ * feature fetches URLs that should never reach internal hosts:
  *
  *  - `isSafeWebhookUrl(url)` — synchronous, cheap. Requires https and rejects
  *    URLs whose host is a literal loopback/private/link-local/reserved IP or an
- *    obviously-internal name (localhost / *.local). Used when validating input
- *    before storing it and in the test endpoint.
+ *    obviously-internal name (localhost / *.local).
  *  - `assertPublicWebhookUrl(url)` — async. Does the sync checks, then resolves
- *    the hostname via DNS and rejects if *any* resolved address is private.
- *    This closes the gap where a public hostname points at an internal IP (or a
- *    DNS-rebind). Called right before the network request in notify.js.
+ *    the hostname via DNS and rejects if *any* resolved address is private,
+ *    closing the gap where a public hostname points at an internal IP (or a
+ *    DNS-rebind).
  */
 
 import dns from 'node:dns/promises';
