@@ -1,14 +1,29 @@
 version: 2
 updates:
+  # GitHub Actions — low risk; bundle all bumps into one PR.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Server npm deps. Group safe minor+patch bumps into a single PR (auto-merged
+  # once CI is green); majors come as individual PRs for manual review.
   - package-ecosystem: npm
     directory: /server
     schedule:
       interval: weekly
+    groups:
+      server-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Client npm deps — same grouping strategy.
   - package-ecosystem: npm
     directory: /client
     schedule:
       interval: weekly
+    groups:
+      client-minor-patch:
+        update-types: ["minor", "patch"]

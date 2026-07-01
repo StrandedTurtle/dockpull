@@ -1,0 +1,31 @@
+name: Dependabot auto-merge
+
+# Automatically enable auto-merge for Dependabot patch/minor updates so they
+# land without manual clicks once CI is green. Major bumps are left for manual
+# review. Requires the repo setting "Allow auto-merge" to be enabled, and a
+# branch-protection rule on main that requires the CI checks (so auto-merge
+# actually waits for them).
+
+on: pull_request_target
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for patch/minor updates
+        if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr merge --auto --squash "$PR_URL" || echo "Auto-merge not enabled — turn on 'Allow auto-merge' in repo settings."
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
