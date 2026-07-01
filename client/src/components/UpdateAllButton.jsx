@@ -1,11 +1,11 @@
 import React, { useCallback, useState } from 'react';
 
 /**
- * Updates every container with `updateAvailable && !pinned`, sequentially:
- * each one is started and fully awaited (start + SSE stream to completion,
- * handled by `runUpdate`) before the next one begins. A failure on one
- * container does not stop the batch — `runUpdate` is expected to resolve
- * (not reject) even on failure, so this loop always continues.
+ * Updates every container with `updateAvailable && !pinned`, all at once:
+ * each is started immediately and its own SSE stream runs concurrently
+ * (handled by `runUpdate`). A failure on one container does not affect the
+ * others — `runUpdate` resolves (not rejects) even on failure, and
+ * `Promise.allSettled` waits for them all regardless.
  *
  * Disabled when there are no eligible targets or any update is in flight.
  */
@@ -15,13 +15,8 @@ export default function UpdateAllButton({ targets, runUpdate, disabled }) {
   const handleClick = useCallback(async () => {
     if (running || disabled || targets.length === 0) return;
     setRunning(true);
-    for (const name of targets) {
-      try {
-        await runUpdate(name);
-      } catch {
-        // Swallow — a failure for one container must not stop the batch.
-      }
-    }
+    // Fire them all immediately, then wait for the whole batch to settle.
+    await Promise.allSettled(targets.map((name) => runUpdate(name)));
     setRunning(false);
   }, [running, disabled, targets, runUpdate]);
 
