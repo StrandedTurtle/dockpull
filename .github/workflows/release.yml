@@ -56,8 +56,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       # Pin a recent QEMU build. The default binfmt image lagged the toolchain
       # in node:22-alpine (gcc 15 / musl 1.2.6), and emulating those newer
@@ -87,3 +86,21 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # On a version tag, create a GitHub Release with auto-generated notes. These
+  # also feed DockPull's own "What's changed" changelog panel.
+  release:
+    name: Create GitHub Release
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
