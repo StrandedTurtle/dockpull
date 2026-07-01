@@ -1370,3 +1370,20 @@ a {
     min-width: 0;
   }
 }
+
+/* ---------- Status / version polish ---------- */
+.card-check-error {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: var(--color-pending);
+}
+
+.about-version {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.dashboard-lastcheck {
+  color: var(--color-text-faint);
+  white-space: nowrap;
+}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { get, getPinned, unpin, getSettings, updateSettings, testNotify } from '../api.js';
+import { get, getPinned, unpin, getSettings, updateSettings, testNotify, getStatus } from '../api.js';
 import { useTheme } from '../hooks/useTheme.js';
 
 // Per-target label/description/placeholder for the notification URL field.
@@ -43,6 +43,7 @@ export default function SettingsPage() {
   const [testStatus, setTestStatus] = useState('');
 
   const [health, setHealth] = useState(null); // null = unknown, true/false once checked
+  const [version, setVersion] = useState('');
 
   const loadPinned = useCallback(async () => {
     setPinnedError('');
@@ -77,6 +78,12 @@ export default function SettingsPage() {
     get('/health')
       .then((data) => setHealth(!!(data && data.ok)))
       .catch(() => setHealth(false));
+  }, []);
+
+  useEffect(() => {
+    getStatus()
+      .then((s) => setVersion(s?.version || ''))
+      .catch(() => {});
   }, []);
 
   const saveSetting = useCallback(async (patch) => {
@@ -366,7 +373,9 @@ export default function SettingsPage() {
 
       <section className="settings-section">
         <h3>About</h3>
-        <p className="about-app-name">DockPull</p>
+        <p className="about-app-name">
+          DockPull{version ? <span className="about-version"> v{version}</span> : null}
+        </p>
         <p className="settings-row-desc">
           A small dashboard for checking your containers' images for updates and applying
           them by hand.

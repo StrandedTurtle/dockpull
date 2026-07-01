@@ -160,6 +160,7 @@ describe('buildContainerItems', () => {
       pinned: false,
       canRevert: false,
       rollbackVersion: null,
+      checkError: null,
       state: 'running',
       composeFile: '/stacks/web/docker-compose.yml',
       composeFileMissing: false,

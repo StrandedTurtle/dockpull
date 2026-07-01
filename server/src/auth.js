@@ -116,7 +116,7 @@ export function loginHandler(req, res) {
     sameSite: 'lax',
     secure: config.BASE_URL.startsWith('https'),
     maxAge: config.SESSION_TTL * 1000,
-    path: '/',
+    path: config.BASE_PATH || '/',
   });
 
   return res.status(200).json({ ok: true });

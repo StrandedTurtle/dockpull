@@ -130,6 +130,11 @@ model and hardening tips (HTTPS/`BASE_URL`, `TRUST_PROXY`, `SESSION_TTL`).
 
 To update DockPull itself: `docker compose pull dockpull && docker compose up -d dockpull`.
 
+**Behind a reverse proxy?** Set `TRUST_PROXY=1`. To serve under a **subpath**
+(`https://host/dockpull/`), either have the proxy strip the prefix, or set
+`BASE_PATH=/dockpull` and build the client with the same value
+(`BASE_PATH=/dockpull docker compose build`).
+
 ---
 
 ## Troubleshooting

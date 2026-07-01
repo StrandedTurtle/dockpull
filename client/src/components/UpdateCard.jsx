@@ -138,7 +138,7 @@ function ChangelogContent({ data }) {
  *  - registerRunner(name, runFn) — handle for "Update all"
  */
 export default function UpdateCard({ container, onSettled, onPinChange, registerRunner }) {
-  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, pinned, sourceUrl, canRevert, rollbackVersion } =
+  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, pinned, sourceUrl, canRevert, rollbackVersion, checkError } =
     container;
 
   const [pinBusy, setPinBusy] = useState(false);
@@ -256,6 +256,11 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
         )}
       </div>
 
+      {checkError && (
+        <p className="card-check-error" title={checkError}>
+          ⚠ Couldn't check for updates (e.g. private registry or rate limit).
+        </p>
+      )}
       {actionError && <StatusMessage type="error" message={actionError} />}
       {startError && <StatusMessage type="error" message={startError} />}
       <StatusMessage type={status.type} message={status.message} />

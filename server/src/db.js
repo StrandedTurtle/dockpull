@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS image_versions (
   version TEXT NOT NULL,
   updated_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS app_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 CREATE TABLE IF NOT EXISTS rollback_points (
   container_name TEXT PRIMARY KEY,
   image_id TEXT NOT NULL,
@@ -95,6 +99,13 @@ const stmts = {
   `),
   getImageVersion: db.prepare(`
     SELECT version FROM image_versions WHERE digest = ? LIMIT 1
+  `),
+  setMeta: db.prepare(`
+    INSERT INTO app_meta (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `),
+  getMeta: db.prepare(`
+    SELECT value FROM app_meta WHERE key = ? LIMIT 1
   `),
   setRollbackPoint: db.prepare(`
     INSERT INTO rollback_points (container_name, image_id, image_ref, old_digest, old_version, created_at)
@@ -198,6 +209,21 @@ export function getImageVersion(digest) {
   if (!digest) return null;
   const row = stmts.getImageVersion.get(digest);
   return row ? row.version : null;
+}
+
+/** Small key/value JSON store for app-level metadata (e.g. last check status). */
+export function setMeta(key, value) {
+  return stmts.setMeta.run(key, JSON.stringify(value));
+}
+
+export function getMeta(key) {
+  const row = stmts.getMeta.get(key);
+  if (!row) return null;
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -34,6 +34,16 @@ if (config.TRUST_PROXY !== false) {
   app.set('trust proxy', config.TRUST_PROXY);
 }
 
+// Subpath support: when served under a prefix (e.g. /dockpull) by a proxy that
+// doesn't strip it, drop the prefix here so all routes below stay prefix-free.
+if (config.BASE_PATH) {
+  app.use((req, res, next) => {
+    if (req.url === config.BASE_PATH) req.url = '/';
+    else if (req.url.startsWith(`${config.BASE_PATH}/`)) req.url = req.url.slice(config.BASE_PATH.length);
+    next();
+  });
+}
+
 // Security headers for every response (no external dependency).
 app.use(securityHeaders({ https: config.BASE_URL.startsWith('https') }));
 

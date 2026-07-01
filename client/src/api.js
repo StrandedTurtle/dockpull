@@ -2,7 +2,9 @@
 // All requests are same-origin (dev proxy forwards /api to the server) and
 // always send the session cookie.
 
-const BASE = '/api';
+// Honour a build-time subpath (Vite `base`), so `/api` is reached under the
+// same prefix the app is served from (e.g. /dockpull/api).
+const BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
 
 class ApiError extends Error {
   constructor(message, status, body) {
@@ -95,6 +97,11 @@ export function getContainers() {
 // { total, checked, updatesFound, errors }.
 export function checkNow() {
   return post('/check');
+}
+
+// App status: { version, lastCheck: { at, total, checked, updatesFound, errors, errored } | null }.
+export function getStatus() {
+  return get('/status');
 }
 
 export function startUpdate(name) {

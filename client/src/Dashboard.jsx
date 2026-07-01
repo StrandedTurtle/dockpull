@@ -1,11 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getContainers, checkNow, getSettings, updateSettings } from './api.js';
+import { getContainers, checkNow, getSettings, updateSettings, getStatus } from './api.js';
 import UpdateCard from './components/UpdateCard.jsx';
 import UpdateAllButton from './components/UpdateAllButton.jsx';
 import StackGroup from './components/StackGroup.jsx';
 
 const AUTOCHECK_SESSION = 'dockpull.autochecked';
 const UNGROUPED = 'Ungrouped';
+
+// Compact "x ago" for the last-checked line.
+function timeAgo(ts) {
+  if (!ts) return null;
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
 
 function hasUpdate(c) {
   return c.updateAvailable && !c.pinned;
@@ -38,6 +50,7 @@ export default function Dashboard({ onPendingCountChange }) {
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState('');
   const [filter, setFilter] = useState('updates');
+  const [lastCheckedAt, setLastCheckedAt] = useState(null);
 
   // name -> run() function, populated by each UpdateCard so "Update all"
   // can drive the same start+SSE flow the per-card button uses.
@@ -60,6 +73,7 @@ export default function Dashboard({ onPendingCountChange }) {
     try {
       const r = await checkNow();
       await load();
+      setLastCheckedAt(Date.now());
       const checked = r?.checked ?? 0;
       const found = r?.updatesFound ?? 0;
       const errs = r?.errors ?? 0;
@@ -74,6 +88,15 @@ export default function Dashboard({ onPendingCountChange }) {
       setChecking(false);
     }
   }, [load]);
+
+  // Seed the "last checked" time from the server's persisted last check.
+  useEffect(() => {
+    getStatus()
+      .then((s) => {
+        if (s?.lastCheck?.at) setLastCheckedAt((prev) => prev || s.lastCheck.at);
+      })
+      .catch(() => {});
+  }, []);
 
   // Initial load + settings + auto-check on first open this session.
   useEffect(() => {
@@ -234,6 +257,7 @@ export default function Dashboard({ onPendingCountChange }) {
 
       <p className="dashboard-subtitle">
         Queries each image's registry for a newer version — nothing is pulled until you tap Update.
+        {lastCheckedAt ? <span className="dashboard-lastcheck"> · Last checked {timeAgo(lastCheckedAt)}</span> : null}
       </p>
 
       <div className="filter-row" role="group" aria-label="Filter containers">

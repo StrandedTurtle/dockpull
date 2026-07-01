@@ -37,6 +37,7 @@ export function buildContainerItems({
   isPinned,
   lookupVersion = () => null,
   getRollback = () => null,
+  getCheckError = () => null,
 }) {
   const items = [];
   const refsToResolve = [];
@@ -88,6 +89,7 @@ export function buildContainerItems({
       pinned: isPinned(c.normalizedRef),
       canRevert: !!rollback,
       rollbackVersion: rollback?.old_version ?? null,
+      checkError: getCheckError(c.normalizedRef),
       state: c.state,
       composeFile: c.composeFile,
       composeFileMissing: c.composeFileMissing ?? false,

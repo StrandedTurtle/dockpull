@@ -7,6 +7,9 @@
  * mounting comment in index.js). This router itself adds no auth.
  */
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { listContainers, getContainerImageMeta } from '../docker.js';
 import { buildContainerItems } from '../containers-service.js';
@@ -21,6 +24,21 @@ import { isValidNotifyUrl } from '../urlguard.js';
 import * as db from '../db.js';
 
 export const apiRouter = express.Router();
+
+// App version, read once from package.json for the About panel / status.
+const APP_VERSION = (() => {
+  try {
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    return JSON.parse(readFileSync(path.join(dir, '..', '..', 'package.json'), 'utf8')).version || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
+
+// App status: version + last check summary (for "last checked" + error count).
+apiRouter.get('/api/status', (req, res) => {
+  return res.status(200).json({ version: APP_VERSION, lastCheck: db.getMeta('lastCheck') });
+});
 
 /**
  * Coerces a query param to a non-negative integer, falling back to
@@ -46,12 +64,16 @@ apiRouter.get('/api/containers', async (req, res) => {
     return res.status(503).json({ error: 'docker_unavailable' });
   }
 
+  const lastCheck = db.getMeta('lastCheck');
+  const errorByRef = new Map((lastCheck?.errored || []).map((e) => [e.ref, e.message]));
+
   const { items, refsToResolve } = buildContainerItems({
     containers,
     lookupEvent: db.latestUnresolvedEventForRef,
     isPinned: (ref) => db.isPinned(ref),
     lookupVersion: (digest) => db.getImageVersion(digest),
     getRollback: (name) => db.getRollbackPoint(name),
+    getCheckError: (ref) => errorByRef.get(ref) || null,
   });
 
   for (const ref of refsToResolve) {
