@@ -140,6 +140,13 @@ To update DockPull itself: `docker compose pull dockpull && docker compose up -d
 `BASE_PATH=/dockpull` and build the client with the same value
 (`BASE_PATH=/dockpull docker compose build`).
 
+**Behind a Cloudflare Tunnel?** A tunnel makes DockPull reachable from the
+public internet, and DockPull controls your Docker socket — the built-in
+password alone is not enough there. Put a [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
+policy (Zero Trust login) in front of the hostname, and set `TRUST_PROXY=1`
+and `BASE_URL=https://your-hostname` so rate-limiting sees real client IPs and
+the session cookie is marked `Secure`.
+
 ---
 
 ## Troubleshooting
@@ -157,6 +164,6 @@ To update DockPull itself: `docker compose pull dockpull && docker compose up -d
   public or `docker login ghcr.io`.
 
 ---
-DISCLAIMER: This porject was made using Claude
+DISCLAIMER: This project was made using Claude
 Endpoint/field reference: [`API_CONTRACT.md`](./API_CONTRACT.md) ·
 Development setup: [`CONTRIBUTING.md`](./CONTRIBUTING.md) · License: MIT.
