@@ -11,6 +11,10 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - SESSION_SECRET=${SESSION_SECRET}
       - STACKS_DIR=${STACKS_DIR}
+      # Timezone for the daily scan's clock. The container is UTC by default,
+      # so a "09:00" scan would otherwise run at 09:00 UTC. Set TZ in your .env,
+      # e.g. TZ=Europe/London.
+      - TZ=${TZ:-UTC}
     volumes:
       # Required so dockerode/the docker CLI inside the container can talk
       # to the host's Docker daemon.

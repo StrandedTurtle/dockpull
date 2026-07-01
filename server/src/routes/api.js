@@ -35,9 +35,24 @@ const APP_VERSION = (() => {
   }
 })();
 
-// App status: version + last check summary (for "last checked" + error count).
+// App status: version, last check summary, and the server's current time +
+// timezone (the daily scan runs on this clock — helps diagnose UTC offsets).
 apiRouter.get('/api/status', (req, res) => {
-  return res.status(200).json({ version: APP_VERSION, lastCheck: db.getMeta('lastCheck') });
+  const now = new Date();
+  let timeZone = 'UTC';
+  try {
+    timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    // fall back to UTC label
+  }
+  return res.status(200).json({
+    version: APP_VERSION,
+    lastCheck: db.getMeta('lastCheck'),
+    serverTime: now.toISOString(),
+    timeZone,
+    // Local HH:MM as the server sees it (what the scheduled scan compares to).
+    serverLocalTime: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+  });
 });
 
 /**
