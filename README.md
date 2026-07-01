@@ -113,6 +113,7 @@ All config is via environment variables (see [`.env.example`](./.env.example)).
 | `DISCORD_WEBHOOK_URL` | — | | Discord webhook for notifications (also editable in Settings). |
 | `GITHUB_TOKEN` | — | | Optional read-only token; raises GitHub's 60/hr changelog/version API limit to 5000/hr. |
 | `SCHEDULED_CHECK_TIME` | `09:00` | | Daily local time (HH:MM) for the background scan. |
+| `TZ` | `UTC` | | Container timezone the scan clock uses (e.g. `Europe/London`); UTC by default. |
 | `BACKGROUND_CHECK_ENABLED` | `true` | | Whether the scheduled scan runs. |
 | `SELF_CONTAINER_NAME` | `dockpull` | | This app's container, excluded so it can't update itself. |
 

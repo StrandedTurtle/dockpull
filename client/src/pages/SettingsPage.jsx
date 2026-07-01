@@ -43,7 +43,7 @@ export default function SettingsPage() {
   const [testStatus, setTestStatus] = useState('');
 
   const [health, setHealth] = useState(null); // null = unknown, true/false once checked
-  const [version, setVersion] = useState('');
+  const [status, setStatus] = useState(null); // { version, serverLocalTime, timeZone }
 
   const loadPinned = useCallback(async () => {
     setPinnedError('');
@@ -82,7 +82,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     getStatus()
-      .then((s) => setVersion(s?.version || ''))
+      .then((s) => setStatus(s || null))
       .catch(() => {});
   }, []);
 
@@ -241,8 +241,16 @@ export default function SettingsPage() {
           <div className="settings-row-label">
             <span>Daily scan time</span>
             <span className="settings-row-desc">
-              When the daily scan runs (server's local time) — set this to when you want your
-              Discord ping.
+              When the daily scan runs, on the <strong>server's clock</strong>
+              {status?.timeZone ? (
+                <>
+                  {' '}
+                  — currently {status.serverLocalTime} {status.timeZone}. If that's off, set the
+                  container's <code>TZ</code> (e.g. <code>TZ=Europe/London</code>).
+                </>
+              ) : (
+                '.'
+              )}
             </span>
           </div>
           <input
@@ -374,7 +382,7 @@ export default function SettingsPage() {
       <section className="settings-section">
         <h3>About</h3>
         <p className="about-app-name">
-          DockPull{version ? <span className="about-version"> v{version}</span> : null}
+          DockPull{status?.version ? <span className="about-version"> v{status.version}</span> : null}
         </p>
         <p className="settings-row-desc">
           A small dashboard for checking your containers' images for updates and applying
