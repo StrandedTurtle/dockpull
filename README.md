@@ -157,6 +157,6 @@ To update DockPull itself: `docker compose pull dockpull && docker compose up -d
   public or `docker login ghcr.io`.
 
 ---
-
+DISCLAIMER: This porject was made using Claude
 Endpoint/field reference: [`API_CONTRACT.md`](./API_CONTRACT.md) ·
 Development setup: [`CONTRIBUTING.md`](./CONTRIBUTING.md) · License: MIT.
