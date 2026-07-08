@@ -43,10 +43,42 @@ docker build -f server/Dockerfile -t dockpull .
   with route changes.
 - `SECURITY.md` — threat model and operator hardening guidance.
 
-## Images / releases
+## Commit message convention
 
-`:latest` is published from every push to `main` (multi-arch: `linux/amd64` +
-`linux/arm64`). Cutting a version tag (`git tag v1.2.0 && git push origin v1.2.0`)
-publishes pinned `:1.2.0` / `:1.2` images and creates a GitHub Release with
-auto-generated notes. Bump `version` in `server/package.json` +
-`client/package.json` (and their lockfiles) to match the tag.
+PR titles / squash-merge commit subjects use a `type: description` prefix —
+this drives the automated release below (which commits count as releasable,
+which changelog section they land in, and whether it's a patch or minor bump):
+
+| Prefix | Meaning | Bump |
+|---|---|---|
+| `feat:` | user-facing feature | minor |
+| `fix:` | bug fix | patch |
+| `perf:` | performance fix | patch |
+| `deps:` | dependency bump | patch |
+| `security:` | security fix | patch |
+| `docs:`, `chore:`, `refactor:`, `test:`, `build:`, `ci:` | no user-facing change | none — no release |
+
+A commit with no recognized prefix doesn't count as releasable either. If the
+*only* changes since the last release are unprefixed or in the "no release"
+row, no Release PR gets opened — that's intentional (e.g. a docs typo fix
+shouldn't ping every user's DockPull with "update available").
+
+## Images / releases — fully automated
+
+Releases are **not** cut by hand. [`release-please`](https://github.com/googleapis/release-please)
+(`.github/workflows/release-please.yml`) watches every push to `main` and
+maintains one standing "Release PR" with the next version + a changelog
+generated from `feat:`/`fix:`/`deps:`/etc. commits since the last release. That
+PR is set to auto-merge the moment required CI passes — merging it is what
+actually cuts the release: release-please creates the git tag + GitHub Release,
+which triggers `release.yml`'s tag-triggered build of pinned `:X.Y.Z` / `:X.Y`
+images (`:latest` already tracks every `main` push independently of this).
+
+Nothing to run by hand: no `npm version`, no `git tag`, no manually editing
+`server/package.json` / `client/package.json` (the release PR does that too,
+via `release-please-config.json`'s `extra-files`).
+
+Want a manual gate instead of full auto-merge (e.g. to batch a few fixes into
+one release, or review the changelog before it ships)? Delete the "Auto-merge
+the release PR" step in `release-please.yml` — the Release PR still opens and
+updates itself automatically, it'll just wait for a manual click on Merge.
