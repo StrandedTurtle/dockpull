@@ -65,6 +65,7 @@ a {
 
 .spinner {
   display: inline-block;
+  flex-shrink: 0;
   width: 1.25em;
   height: 1.25em;
   border: 2px solid currentColor;
@@ -588,6 +589,25 @@ a {
 
 .update-btn {
   flex: 1;
+}
+
+/* Below 480px, don't let the links row and the action button fight over
+   horizontal space (that's what squeezed "Updating…" + its spinner into a
+   sliver). Stack them: links wrap on their own full-width line, the button
+   gets a full-width line to itself with room for its label + spinner. */
+@media (max-width: 479.98px) {
+  .card-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .card-actions-left {
+    width: 100%;
+  }
+
+  .update-btn {
+    width: 100%;
+  }
 }
 
 @media (min-width: 480px) {
