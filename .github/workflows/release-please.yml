@@ -1,0 +1,45 @@
+name: release-please
+
+# Maintains a standing "Release PR" that accumulates feat:/fix:/deps: commits
+# since the last release into a version bump + changelog (release-please-config.json
+# controls which commit types count and where they land in CHANGELOG.md). Every
+# push to main updates that one PR in place rather than opening a new one.
+#
+# The auto-merge step below merges that PR itself the moment required CI passes
+# (same pattern as dependabot-auto-merge.yml), so a qualifying change on main
+# becomes a tagged release with no manual version bump or `git tag` needed. That
+# merge is what actually cuts the release: release-please creates the git tag +
+# GitHub Release, which triggers release.yml's tag-triggered image publish
+# (pinned :X.Y.Z / :X.Y images).
+#
+# Want a manual gate instead (open the PR, but decide yourself when to ship)?
+# Delete the "Auto-merge the release PR" step below — everything else still
+# works, you just click Merge on the PR when you're ready.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+
+      - name: Auto-merge the release PR once it's open
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+          gh pr merge --auto --squash "$PR_NUMBER" \
+            || echo "Auto-merge not enabled — turn on 'Allow auto-merge' in repo settings, or merge #$PR_NUMBER manually."
