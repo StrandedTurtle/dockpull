@@ -42,7 +42,17 @@ function relativeTime(value) {
  */
 export default function HistoryRow({ entry }) {
   const [expanded, setExpanded] = useState(false);
-  const { container_name, image, old_digest, new_digest, status, message, created_at } = entry;
+  const {
+    container_name,
+    image,
+    old_digest,
+    new_digest,
+    old_version,
+    new_version,
+    status,
+    message,
+    created_at,
+  } = entry;
 
   const isSuccess = status === 'success';
   const toggle = () => setExpanded((value) => !value);
@@ -79,12 +89,13 @@ export default function HistoryRow({ entry }) {
       </div>
 
       <div className="history-row-meta">
+        {/* Prefer human versions ("2.14.0 → 2.14.1"); fall back to short digests. */}
         <span className="history-row-digests">
-          <span className="digest-value">{shortDigest(old_digest)}</span>
+          <span className="digest-value">{old_version || shortDigest(old_digest)}</span>
           <span className="digest-arrow" aria-hidden="true">
             →
           </span>
-          <span className="digest-value">{shortDigest(new_digest)}</span>
+          <span className="digest-value">{new_version || shortDigest(new_digest)}</span>
         </span>
         <span className="history-row-time" title={date ? date.toISOString() : ''}>
           {relativeTime(created_at)}
@@ -93,6 +104,14 @@ export default function HistoryRow({ entry }) {
 
       {expanded && (
         <div className="history-row-details">
+          {(old_version || new_version) && (
+            <div className="digest-row">
+              <span className="digest-label">Version</span>
+              <span className="digest-value">
+                {old_version || '—'} → {new_version || '—'}
+              </span>
+            </div>
+          )}
           <div className="digest-row">
             <span className="digest-label">Old digest</span>
             <span className="digest-value digest-value-full">{old_digest || '—'}</span>

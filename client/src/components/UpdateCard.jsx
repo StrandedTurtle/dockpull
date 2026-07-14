@@ -138,7 +138,7 @@ function ChangelogContent({ data }) {
  *  - registerRunner(name, runFn) — handle for "Update all"
  */
 export default function UpdateCard({ container, onSettled, onPinChange, registerRunner }) {
-  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, pinned, sourceUrl, canRevert, rollbackVersion, checkError } =
+  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, pinned, sourceUrl, canRevert, rollbackVersion, checkError, state } =
     container;
 
   const [pinBusy, setPinBusy] = useState(false);
@@ -224,6 +224,11 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
               </span>
             )}
             {pinned && <span className="pill pill-pinned">Version pinned</span>}
+            {state && state !== 'running' && (
+              <span className="pill pill-state" title={`Container is ${state} — updating it will start it`}>
+                {state}
+              </span>
+            )}
           </div>
         </div>
         <button
