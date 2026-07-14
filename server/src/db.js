@@ -61,9 +61,10 @@ CREATE INDEX IF NOT EXISTS idx_events_ref ON update_events(normalized_ref, resol
 CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC);
 `);
 
-// Migrations: add `notified` (dedupe Discord notifications) and
+// Migrations: add `notified` (dedupe Discord notifications),
 // `available_version` (the OCI version label of the remote/available image,
-// best-effort) to update_events.
+// best-effort) and `breaking` (release notes between running and available
+// versions mention breaking changes, best-effort) to update_events.
 {
   const cols = db.prepare('PRAGMA table_info(update_events)').all().map((col) => col.name);
   if (!cols.includes('notified')) {
@@ -72,12 +73,15 @@ CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC
   if (!cols.includes('available_version')) {
     db.exec('ALTER TABLE update_events ADD COLUMN available_version TEXT');
   }
+  if (!cols.includes('breaking')) {
+    db.exec('ALTER TABLE update_events ADD COLUMN breaking INTEGER DEFAULT 0');
+  }
 }
 
 const stmts = {
   recordEvent: db.prepare(`
-    INSERT INTO update_events (image, normalized_ref, status, digest, available_version, raw_json)
-    VALUES (@image, @normalized_ref, @status, @digest, @available_version, @raw_json)
+    INSERT INTO update_events (image, normalized_ref, status, digest, available_version, breaking, raw_json)
+    VALUES (@image, @normalized_ref, @status, @digest, @available_version, @breaking, @raw_json)
   `),
   latestUnresolvedEventForRef: db.prepare(`
     SELECT * FROM update_events
@@ -172,13 +176,14 @@ const stmts = {
   `),
 };
 
-export function recordEvent({ image, normalized_ref, status, digest, available_version, raw_json }) {
+export function recordEvent({ image, normalized_ref, status, digest, available_version, breaking, raw_json }) {
   return stmts.recordEvent.run({
     image,
     normalized_ref,
     status,
     digest: digest ?? null,
     available_version: available_version ?? null,
+    breaking: breaking ? 1 : 0,
     raw_json: raw_json ?? null,
   });
 }

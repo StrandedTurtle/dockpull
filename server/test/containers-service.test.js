@@ -157,6 +157,7 @@ describe('buildContainerItems', () => {
       updateAvailable: false,
       availableDigest: null,
       availableVersion: null,
+      breakingRisk: false,
       pinned: false,
       canRevert: false,
       rollbackVersion: null,
@@ -168,6 +169,22 @@ describe('buildContainerItems', () => {
     });
   });
 
+
+  test('event with breaking=1 -> breakingRisk true only while an update is pending', () => {
+    const containers = [makeContainer({ currentDigest: 'sha256:aaa' })];
+    const lookupEvent = () => ({ digest: 'sha256:bbb', breaking: 1 });
+    const { items } = buildContainerItems({ containers, lookupEvent, isPinned: () => false });
+    assert.equal(items[0].breakingRisk, true);
+
+    // Same flag but digests match (update applied) -> no update, no risk.
+    const applied = buildContainerItems({
+      containers: [makeContainer({ currentDigest: 'sha256:bbb' })],
+      lookupEvent,
+      isPinned: () => false,
+    });
+    assert.equal(applied.items[0].updateAvailable, false);
+    assert.equal(applied.items[0].breakingRisk, false);
+  });
 
   test('handles multiple containers independently', () => {
     const containers = [

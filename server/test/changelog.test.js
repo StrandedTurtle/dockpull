@@ -5,6 +5,7 @@ import {
   selectNewerReleases,
   buildRegistryLink,
   pickLatestReleaseTag,
+  detectBreakingChanges,
 } from '../src/changelog.js';
 
 test('parseGitHubRepo: extracts owner/repo, strips .git', () => {
@@ -57,6 +58,30 @@ test('pickLatestReleaseTag: falls back to name; null when none', () => {
   assert.equal(pickLatestReleaseTag([{ tag_name: 'v1', draft: true }]), null);
   assert.equal(pickLatestReleaseTag([]), null);
   assert.equal(pickLatestReleaseTag(null), null);
+});
+
+test('detectBreakingChanges: matches breaking-change signals in body or name', () => {
+  assert.equal(
+    detectBreakingChanges([{ tag_name: 'v2.0.0', body: 'BREAKING CHANGE: config format changed' }]),
+    true
+  );
+  assert.equal(detectBreakingChanges([{ name: 'v3.0.0 — breaking changes ahead', body: '' }]), true);
+  assert.equal(detectBreakingChanges([{ tag_name: 'v1.5.0', body: 'Migration required for the new schema' }]), true);
+  assert.equal(detectBreakingChanges([{ tag_name: 'v1.4.0', body: 'The old API is deprecated' }]), true);
+  assert.equal(detectBreakingChanges([{ tag_name: 'v1.3.0', body: 'Action required: rotate your tokens' }]), true);
+});
+
+test('detectBreakingChanges: does not match unrelated text', () => {
+  assert.equal(detectBreakingChanges([{ tag_name: 'v1.0.1', body: 'fixed bug in navbar' }]), false);
+  // \b boundary: "unbreakable" must not trip the "breaking" signal.
+  assert.equal(detectBreakingChanges([{ tag_name: 'v1.0.2', body: 'now with unbreakable encryption' }]), false);
+});
+
+test('detectBreakingChanges: handles null/empty input', () => {
+  assert.equal(detectBreakingChanges(null), false);
+  assert.equal(detectBreakingChanges(undefined), false);
+  assert.equal(detectBreakingChanges([]), false);
+  assert.equal(detectBreakingChanges('not an array'), false);
 });
 
 test('buildRegistryLink: docker hub official + namespaced, ghcr', () => {

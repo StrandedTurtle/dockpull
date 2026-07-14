@@ -138,7 +138,7 @@ function ChangelogContent({ data }) {
  *  - registerRunner(name, runFn) — handle for "Update all"
  */
 export default function UpdateCard({ container, onSettled, onPinChange, registerRunner }) {
-  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, pinned, sourceUrl, canRevert, rollbackVersion, checkError, state } =
+  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, breakingRisk, pinned, sourceUrl, canRevert, rollbackVersion, checkError, state } =
     container;
 
   const [pinBusy, setPinBusy] = useState(false);
@@ -257,6 +257,9 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
             <span className="version-value is-available" title={availableDigest || ''}>
               {isMeaningfulVersion(availableVersion) ? availableVersion : 'newer image'}
             </span>
+            {breakingRisk && (
+              <span className="breaking-flag" title="Release notes mention possible breaking changes">⚠️</span>
+            )}
           </div>
         )}
       </div>
@@ -320,6 +323,9 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
 
       {clOpen && (
         <div className="changelog-panel">
+          {breakingRisk && clData?.type === 'github' && (
+            <p className="breaking-note">⚠️ These release notes mention possible breaking changes — review before updating.</p>
+          )}
           {clLoading && (
             <div className="changelog-loading">
               <span className="spinner" aria-hidden="true" /> Loading release notes…
