@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { API_BASE } from '../api.js';
 
 /**
  * Subscribes to the update SSE stream for a container by name.
@@ -31,7 +32,7 @@ export function useSSE(name, active) {
     setError(null);
     setConnected(false);
 
-    const es = new EventSource(`/api/update/${encodeURIComponent(name)}/stream`);
+    const es = new EventSource(`${API_BASE}/update/${encodeURIComponent(name)}/stream`);
     esRef.current = es;
 
     es.onopen = () => {

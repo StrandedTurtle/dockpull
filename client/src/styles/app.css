@@ -451,6 +451,12 @@ a {
   color: var(--color-pending);
 }
 
+/* Non-running container state (exited/restarting/paused/…). */
+.pill-state {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--color-error);
+}
+
 .card-meta-row {
   display: flex;
   flex-wrap: wrap;
@@ -1087,8 +1093,28 @@ a {
 
 .filter-row {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+/* Dashboard search (shown once the container list is big enough to need it). */
+.dashboard-search-input {
+  flex: 1 1 160px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.dashboard-search-input:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 .chip {
@@ -1122,6 +1148,35 @@ a {
 .banner-warn {
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.4);
+  color: var(--color-text);
+}
+
+.banner-ok {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  color: var(--color-text);
+}
+
+/* "Update all finished" summary: message + a dismiss control. */
+.batch-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.banner-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0 4px;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.banner-dismiss:hover {
   color: var(--color-text);
 }
 

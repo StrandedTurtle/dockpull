@@ -115,12 +115,18 @@ All request/response bodies are JSON unless noted otherwise.
       "image": "nginx:latest",
       "old_digest": "sha256:...",
       "new_digest": "sha256:...",
+      "old_version": "1.27.3",
+      "new_version": "1.27.4",
       "status": "success",
       "message": "Updated successfully",
       "created_at": "2026-06-22 12:00:00"
     }
   ]
   ```
+- `old_version` / `new_version` are human-readable versions resolved from the
+  per-digest version store (learned during update checks), best-effort — `null`
+  when a digest's version was never learned; clients should fall back to
+  showing the digest.
 
 ### `GET /api/history/:name`
 

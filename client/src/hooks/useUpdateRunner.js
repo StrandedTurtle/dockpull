@@ -35,16 +35,21 @@ export function useUpdateRunner(name, onSettled) {
   // the one real update.
   const pendingRunRef = useRef(null);
 
-  const settle = useCallback(() => {
-    if (settledRef.current) return;
-    settledRef.current = true;
-    pendingRunRef.current = null;
-    onSettled(name);
-    if (resolveRef.current) {
-      resolveRef.current();
-      resolveRef.current = null;
-    }
-  }, [name, onSettled]);
+  const settle = useCallback(
+    (outcome) => {
+      if (settledRef.current) return;
+      settledRef.current = true;
+      pendingRunRef.current = null;
+      onSettled(name);
+      if (resolveRef.current) {
+        // Resolve the run() promise with the outcome so batch callers
+        // ("Update all") can summarize successes/failures per container.
+        resolveRef.current(outcome || { success: false, message: '' });
+        resolveRef.current = null;
+      }
+    },
+    [name, onSettled]
+  );
 
   // Shared start path for both "update" and "revert" — same SSE stream + result
   // handling, only the kickoff request and the pending message differ.
@@ -65,7 +70,7 @@ export function useUpdateRunner(name, onSettled) {
           })
           .catch((err) => {
             setStartError(err.message || 'Failed to start');
-            settle();
+            settle({ success: false, message: err.message || 'Failed to start' });
           })
           .finally(() => setStarting(false));
       });
@@ -85,7 +90,7 @@ export function useUpdateRunner(name, onSettled) {
       type: result.success ? 'success' : 'error',
       message: result.message || (result.success ? 'Updated successfully' : 'Update failed'),
     });
-    settle();
+    settle({ success: !!result.success, message: result.message || '' });
   }, [result, settle]);
 
   useEffect(() => {
@@ -95,7 +100,7 @@ export function useUpdateRunner(name, onSettled) {
     if (result || settledRef.current) return;
     setStreamActive(false);
     setStatus({ type: 'error', message: sseError });
-    settle();
+    settle({ success: false, message: sseError });
   }, [sseError, result, settle]);
 
   const busy = starting || streamActive;

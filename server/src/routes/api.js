@@ -118,18 +118,29 @@ apiRouter.get('/api/events', (req, res) => {
   subscribeGlobal(res, req);
 });
 
+// Enrich history rows with human-readable versions remembered per digest
+// (image_versions store), so the UI can show "2.14.0 → 2.14.1" instead of
+// hashes. Best-effort: null when a digest's version was never learned.
+function withVersions(rows) {
+  return rows.map((r) => ({
+    ...r,
+    old_version: db.getImageVersion(r.old_digest),
+    new_version: db.getImageVersion(r.new_digest),
+  }));
+}
+
 apiRouter.get('/api/history', (req, res) => {
   const limit = toSafeInt(req.query.limit, 50, 500);
   const offset = toSafeInt(req.query.offset, 0);
   const rows = db.getHistory({ containerName: req.query.container, limit, offset });
-  return res.status(200).json(rows);
+  return res.status(200).json(withVersions(rows));
 });
 
 apiRouter.get('/api/history/:name', (req, res) => {
   const limit = toSafeInt(req.query.limit, 50, 500);
   const offset = toSafeInt(req.query.offset, 0);
   const rows = db.getHistory({ containerName: req.params.name, limit, offset });
-  return res.status(200).json(rows);
+  return res.status(200).json(withVersions(rows));
 });
 
 // Wipe all update history (behind requireAuth, like the rest of /api/*).

@@ -9,16 +9,26 @@ import React, { useCallback, useState } from 'react';
  *
  * Disabled when there are no eligible targets or any update is in flight.
  */
-export default function UpdateAllButton({ targets, runUpdate, disabled }) {
+export default function UpdateAllButton({ targets, runUpdate, disabled, onBatchDone }) {
   const [running, setRunning] = useState(false);
 
   const handleClick = useCallback(async () => {
     if (running || disabled || targets.length === 0) return;
     setRunning(true);
     // Fire them all immediately, then wait for the whole batch to settle.
-    await Promise.allSettled(targets.map((name) => runUpdate(name)));
+    // Each run() resolves (never rejects) with { success, message }, so the
+    // dashboard can show one aggregate summary instead of making the user
+    // scroll every card to find what failed.
+    const outcomes = await Promise.all(
+      targets.map((name) =>
+        Promise.resolve(runUpdate(name))
+          .then((r) => ({ name, success: !!(r && r.success), message: (r && r.message) || '' }))
+          .catch((err) => ({ name, success: false, message: err?.message || '' }))
+      )
+    );
     setRunning(false);
-  }, [running, disabled, targets, runUpdate]);
+    if (onBatchDone) onBatchDone(outcomes);
+  }, [running, disabled, targets, runUpdate, onBatchDone]);
 
   return (
     <button

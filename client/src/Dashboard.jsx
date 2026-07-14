@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getContainers, checkNow, getSettings, updateSettings, getStatus } from './api.js';
+import { getContainers, checkNow, getSettings, updateSettings, getStatus, API_BASE } from './api.js';
 import UpdateCard from './components/UpdateCard.jsx';
 import UpdateAllButton from './components/UpdateAllButton.jsx';
 import StackGroup from './components/StackGroup.jsx';
@@ -50,7 +50,17 @@ export default function Dashboard({ onPendingCountChange }) {
   const [checking, setChecking] = useState(false);
   const [checkMsg, setCheckMsg] = useState('');
   const [filter, setFilter] = useState('updates');
+  const [search, setSearch] = useState('');
   const [lastCheckedAt, setLastCheckedAt] = useState(null);
+  const [batchSummary, setBatchSummary] = useState(null);
+  // Re-render every minute so "Last checked Xm ago" doesn't go stale while
+  // the page sits open.
+  const [, setClockTick] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setClockTick((t) => t + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
 
   // name -> run() function, populated by each UpdateCard so "Update all"
   // can drive the same start+SSE flow the per-card button uses.
@@ -139,7 +149,8 @@ export default function Dashboard({ onPendingCountChange }) {
     let es;
     let debounce;
     try {
-      es = new EventSource('/api/events');
+      // API_BASE (not a literal '/api') so live refresh works under a subpath.
+      es = new EventSource(`${API_BASE}/events`);
       es.onmessage = (e) => {
         let payload;
         try {
@@ -186,6 +197,11 @@ export default function Dashboard({ onPendingCountChange }) {
     });
   }, []);
 
+  const handleBatchDone = useCallback((outcomes) => {
+    const failed = outcomes.filter((o) => !o.success);
+    setBatchSummary({ ok: outcomes.length - failed.length, failed });
+  }, []);
+
   // Pinned go to their own bottom section; everything else is the main list.
   const visible = containers;
   const pinnedItems = useMemo(
@@ -200,10 +216,19 @@ export default function Dashboard({ onPendingCountChange }) {
     if (onPendingCountChange) onPendingCountChange(pendingTargets.length);
   }, [pendingTargets, onPendingCountChange]);
 
-  // Apply the filter, then group by stack (compose project); groups with
-  // updates come first.
+  // Apply the filter chip + search needle, then group by stack (compose
+  // project); groups with updates come first.
   const groups = useMemo(() => {
-    const items = filter === 'updates' ? mainItems.filter(hasUpdate) : mainItems;
+    let items = filter === 'updates' ? mainItems.filter(hasUpdate) : mainItems;
+    const needle = search.trim().toLowerCase();
+    if (needle) {
+      items = items.filter(
+        (c) =>
+          c.name.toLowerCase().includes(needle) ||
+          (c.image || '').toLowerCase().includes(needle) ||
+          (c.project || '').toLowerCase().includes(needle)
+      );
+    }
     const byProject = new Map();
     for (const c of items) {
       const key = c.project || UNGROUPED;
@@ -224,7 +249,7 @@ export default function Dashboard({ onPendingCountChange }) {
       return a.project.localeCompare(b.project);
     });
     return out;
-  }, [mainItems, filter]);
+  }, [mainItems, filter, search]);
 
   const mainCount = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups]);
 
@@ -251,7 +276,12 @@ export default function Dashboard({ onPendingCountChange }) {
             {checking && <span className="spinner" aria-hidden="true" />}
             {checking ? 'Checking…' : 'Check for updates'}
           </button>
-          <UpdateAllButton targets={pendingTargets} runUpdate={runUpdateFor} disabled={loading || !!error} />
+          <UpdateAllButton
+            targets={pendingTargets}
+            runUpdate={runUpdateFor}
+            disabled={loading || !!error}
+            onBatchDone={handleBatchDone}
+          />
         </div>
       </div>
 
@@ -277,9 +307,45 @@ export default function Dashboard({ onPendingCountChange }) {
         >
           All
         </button>
+        {containers.length > 8 && (
+          <input
+            type="search"
+            className="dashboard-search-input"
+            placeholder="Search containers…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search containers by name, image, or stack"
+          />
+        )}
       </div>
 
       {checkMsg && <p className="check-msg">{checkMsg}</p>}
+
+      {batchSummary && (
+        <div
+          className={`banner ${batchSummary.failed.length > 0 ? 'banner-warn' : 'banner-ok'} batch-banner`}
+          role="status"
+        >
+          <span>
+            <strong>Update all finished:</strong> {batchSummary.ok} updated
+            {batchSummary.failed.length > 0 && (
+              <>
+                , {batchSummary.failed.length} failed —{' '}
+                {batchSummary.failed.map((f) => f.name).join(', ')}. See those cards for details.
+              </>
+            )}
+            {batchSummary.failed.length === 0 && '. 🎉'}
+          </span>
+          <button
+            type="button"
+            className="banner-dismiss"
+            onClick={() => setBatchSummary(null)}
+            aria-label="Dismiss summary"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {mountIssue && (
         <div className="banner banner-warn" role="alert">
@@ -319,7 +385,16 @@ export default function Dashboard({ onPendingCountChange }) {
         </div>
       )}
 
-      {!loading && !error && visible.length > 0 && mainCount === 0 && (
+      {!loading && !error && visible.length > 0 && mainCount === 0 && search.trim() && (
+        <div className="empty-state">
+          <p>No containers match “{search.trim()}”.</p>
+          <button type="button" className="btn btn-sm" onClick={() => setSearch('')}>
+            Clear search
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && visible.length > 0 && mainCount === 0 && !search.trim() && (
         <div className="empty-state">
           <p>Everything's up to date. 🎉</p>
           {filter === 'updates' && (

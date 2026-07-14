@@ -92,6 +92,10 @@ export async function runCheck() {
           if (!isMeaningfulVersion(c.currentVersion)) {
             const tag = await releaseTagForSource(c);
             if (tag) db.setImageVersion(c.currentDigest, tag);
+          } else {
+            // Remember the running version for this digest too, so update
+            // history can show "old version → new version" after it's replaced.
+            db.setImageVersion(c.currentDigest, c.currentVersion);
           }
           continue;
         }

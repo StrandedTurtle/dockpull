@@ -3,8 +3,10 @@
 // always send the session cookie.
 
 // Honour a build-time subpath (Vite `base`), so `/api` is reached under the
-// same prefix the app is served from (e.g. /dockpull/api).
+// same prefix the app is served from (e.g. /dockpull/api). Exported for the
+// SSE consumers (EventSource can't go through `request()`).
 const BASE = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api`;
+export const API_BASE = BASE;
 
 class ApiError extends Error {
   constructor(message, status, body) {

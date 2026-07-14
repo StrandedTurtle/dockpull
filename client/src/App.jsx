@@ -40,6 +40,17 @@ export default function App() {
     return () => setUnauthorizedHandler(null);
   }, []);
 
+  // Installed-PWA nicety: mirror the pending-update count onto the app icon
+  // (Badging API — a no-op on browsers/platforms without it).
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('setAppBadge' in navigator)) return;
+    if (authenticated && pendingCount > 0) {
+      navigator.setAppBadge(pendingCount).catch(() => {});
+    } else {
+      navigator.clearAppBadge().catch(() => {});
+    }
+  }, [pendingCount, authenticated]);
+
   const handleAuthed = useCallback(() => {
     checkSession();
     navigate('/'); // land on the dashboard after signing in
