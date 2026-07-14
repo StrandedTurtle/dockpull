@@ -796,4 +796,20 @@ export async function getContainerImageMeta(name) {
   return { image, currentVersion: version, sourceUrl: source };
 }
 
+/**
+ * Remove dangling images (untagged layers no container references) —
+ * the leftovers that accumulate after image updates. Safe: never touches
+ * tagged images or anything in use.
+ *
+ * @returns {Promise<{ deleted: number, spaceReclaimed: number }>}
+ */
+export async function pruneDanglingImages() {
+  // dockerode serializes the filters object into the API's JSON filter param.
+  const result = await docker.pruneImages({ filters: { dangling: ['true'] } });
+  return {
+    deleted: result.ImagesDeleted?.length ?? 0,
+    spaceReclaimed: result.SpaceReclaimed ?? 0,
+  };
+}
+
 export { docker };

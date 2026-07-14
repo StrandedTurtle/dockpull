@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { listContainers, getContainerImageMeta } from '../docker.js';
+import { listContainers, getContainerImageMeta, pruneDanglingImages } from '../docker.js';
 import { buildContainerItems } from '../containers-service.js';
 import { normalizeRef } from '../reconcile.js';
 import { runCheck } from '../checker.js';
@@ -147,6 +147,21 @@ apiRouter.get('/api/history/:name', (req, res) => {
 apiRouter.delete('/api/history', (req, res) => {
   db.clearHistory();
   return res.status(200).json({ ok: true });
+});
+
+// Remove dangling image layers (post-update leftovers).
+apiRouter.post('/api/images/prune', async (req, res) => {
+  let result;
+  try {
+    result = await pruneDanglingImages();
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ECONNREFUSED') {
+      return res.status(503).json({ error: 'docker_unavailable' });
+    }
+    console.error(`api.js: POST /api/images/prune failed: ${err.message}`);
+    return res.status(500).json({ error: 'prune_failed' });
+  }
+  return res.status(200).json({ ok: true, deleted: result.deleted, spaceReclaimed: result.spaceReclaimed });
 });
 
 apiRouter.get('/api/pinned', (req, res) => {
