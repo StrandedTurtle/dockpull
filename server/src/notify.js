@@ -19,7 +19,8 @@ export const NOTIFY_TYPES = ['discord', 'ntfy', 'gotify', 'webhook'];
 function summaryLines(items) {
   return items.slice(0, MAX_LISTED).map((i) => {
     const ver = i.currentVersion ? ` (current: ${i.currentVersion})` : '';
-    return `• ${i.name} — ${i.image}${ver}`;
+    const warn = i.breakingRisk ? '⚠️ ' : '';
+    return `• ${warn}${i.name} — ${i.image}${ver}`;
   });
 }
 
@@ -41,7 +42,8 @@ export function buildDiscordPayload(items) {
   const header = `🔔 **${title(items)}**`;
   const lines = items.slice(0, MAX_LISTED).map((i) => {
     const ver = i.currentVersion ? ` (current: ${i.currentVersion})` : '';
-    return `• **${i.name}** — \`${i.image}\`${ver}`;
+    const warn = i.breakingRisk ? '⚠️ ' : '';
+    return `• ${warn}**${i.name}** — \`${i.image}\`${ver}`;
   });
   return { content: [header, ...lines, ...moreLine(items)].join('\n') };
 }

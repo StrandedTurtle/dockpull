@@ -120,9 +120,58 @@ export function pickLatestReleaseTag(releases) {
   return null;
 }
 
-// Cache release-tag lookups so repeated checks don't re-hit the GitHub API.
-const releaseTagCache = new Map(); // "owner/repo" -> { at, tag }
-const RELEASE_TAG_TTL_MS = 30 * 60 * 1000;
+// Conservative breaking-change signals. Word-bounded so prose like
+// "unbreakable" never trips the flag.
+const BREAKING_PATTERNS = [
+  /\bbreaking\b/i, // "BREAKING CHANGE", "breaking changes"
+  /\bmigration(s)? (required|needed|guide)\b/i,
+  /\bdeprecated\b/i,
+  /\bincompatible\b/i,
+  /\baction required\b/i,
+];
+
+/**
+ * True if any release's name or body mentions a breaking-change signal.
+ * Pure + testable; feed it selectNewerReleases() output so only the notes
+ * between the running version and the newest release are scanned.
+ *
+ * @param {Array<{name?: string, tag_name?: string, body?: string}>} releases
+ * @returns {boolean}
+ */
+export function detectBreakingChanges(releases) {
+  if (!Array.isArray(releases)) return false;
+  return releases.some((r) => {
+    const text = `${r?.name || ''}\n${r?.body || ''}`;
+    return BREAKING_PATTERNS.some((re) => re.test(text));
+  });
+}
+
+// Cache release lists so repeated checks don't re-hit the GitHub API.
+const releasesCache = new Map(); // "owner/repo" -> { at, releases }
+const RELEASES_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * Best-effort release list for a GitHub repo (cached, 30-min TTL). Returns
+ * null on any failure — never throws.
+ *
+ * @param {string} owner
+ * @param {string} repo
+ * @returns {Promise<Array<object>|null>}
+ */
+export async function getReleasesCached(owner, repo) {
+  const key = `${owner}/${repo}`;
+  const cached = releasesCache.get(key);
+  if (cached && Date.now() - cached.at < RELEASES_TTL_MS) {
+    return cached.releases;
+  }
+  try {
+    const releases = await fetchGitHubReleases(owner, repo);
+    releasesCache.set(key, { at: Date.now(), releases });
+    return releases;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Best-effort latest-release tag for a GitHub repo (cached). Returns null on
@@ -133,19 +182,8 @@ const RELEASE_TAG_TTL_MS = 30 * 60 * 1000;
  * @returns {Promise<string|null>}
  */
 export async function getLatestReleaseTag(owner, repo) {
-  const key = `${owner}/${repo}`;
-  const cached = releaseTagCache.get(key);
-  if (cached && Date.now() - cached.at < RELEASE_TAG_TTL_MS) {
-    return cached.tag;
-  }
-  try {
-    const releases = await fetchGitHubReleases(owner, repo);
-    const tag = pickLatestReleaseTag(releases);
-    releaseTagCache.set(key, { at: Date.now(), tag });
-    return tag;
-  } catch {
-    return null;
-  }
+  const releases = await getReleasesCached(owner, repo);
+  return pickLatestReleaseTag(releases);
 }
 
 /**
@@ -195,5 +233,7 @@ export default {
   buildRegistryLink,
   getChangelog,
   pickLatestReleaseTag,
+  detectBreakingChanges,
+  getReleasesCached,
   getLatestReleaseTag,
 };

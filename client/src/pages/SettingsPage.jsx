@@ -1,6 +1,20 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { get, getPinned, unpin, getSettings, updateSettings, testNotify, getStatus } from '../api.js';
+import { get, getPinned, unpin, getSettings, updateSettings, testNotify, getStatus, pruneImages } from '../api.js';
+import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { useTheme } from '../hooks/useTheme.js';
+
+// Human-readable byte count: whole bytes below 1 KB, one decimal above.
+function formatBytes(n) {
+  if (!Number.isFinite(n) || n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = n;
+  let i = -1;
+  do {
+    value /= 1024;
+    i += 1;
+  } while (value >= 1024 && i < units.length - 1);
+  return `${value.toFixed(1)} ${units[i]}`;
+}
 
 // Per-target label/description/placeholder for the notification URL field.
 const NOTIFY_META = {
@@ -41,6 +55,10 @@ export default function SettingsPage() {
   const [webhookInit, setWebhookInit] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testStatus, setTestStatus] = useState('');
+
+  const [confirmPrune, setConfirmPrune] = useState(false);
+  const [pruning, setPruning] = useState(false);
+  const [pruneStatus, setPruneStatus] = useState('');
 
   const [health, setHealth] = useState(null); // null = unknown, true/false once checked
   const [status, setStatus] = useState(null); // { version, serverLocalTime, timeZone }
@@ -114,6 +132,24 @@ export default function SettingsPage() {
       setTesting(false);
     }
   }, [webhookDraft, settings, saveSetting]);
+
+  const handlePrune = useCallback(async () => {
+    setConfirmPrune(false);
+    setPruning(true);
+    setPruneStatus('');
+    try {
+      const { deleted = 0, spaceReclaimed = 0 } = (await pruneImages()) || {};
+      setPruneStatus(
+        deleted > 0
+          ? `Freed ${formatBytes(spaceReclaimed)} (${deleted} layer${deleted === 1 ? '' : 's'} removed).`
+          : 'Nothing to prune — no dangling layers found.'
+      );
+    } catch (err) {
+      setPruneStatus(err.message || 'Prune failed');
+    } finally {
+      setPruning(false);
+    }
+  }, []);
 
   const handleUnpin = useCallback(
     async (ref) => {
@@ -376,6 +412,43 @@ export default function SettingsPage() {
               </li>
             ))}
           </ul>
+        )}
+      </section>
+
+      <section className="settings-section">
+        <h3>Maintenance</h3>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Prune unused image layers</span>
+            <span className="settings-row-desc">
+              Removes dangling image layers left behind after updates. Safe — only untagged
+              layers that nothing uses.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setConfirmPrune(true)}
+            disabled={pruning}
+          >
+            {pruning && <span className="spinner" aria-hidden="true" />}
+            Prune now
+          </button>
+        </div>
+        {pruneStatus && (
+          <div className="settings-row">
+            <span className="settings-test-status">{pruneStatus}</span>
+          </div>
+        )}
+        {confirmPrune && (
+          <ConfirmDialog
+            title="Prune unused image layers?"
+            message="This removes dangling image layers left behind after updates. Tagged images and anything in use are never touched."
+            confirmLabel="Prune"
+            confirming={pruning}
+            onConfirm={handlePrune}
+            onCancel={() => setConfirmPrune(false)}
+          />
         )}
       </section>
 

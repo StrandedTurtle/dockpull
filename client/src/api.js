@@ -129,6 +129,13 @@ export function clearHistory() {
   return del('/history');
 }
 
+// --- Maintenance ---
+
+// Remove dangling image layers. Returns { ok, deleted, spaceReclaimed }.
+export function pruneImages() {
+  return post('/images/prune');
+}
+
 // --- Pinning ---
 
 export function getPinned() {

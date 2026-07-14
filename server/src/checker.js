@@ -11,7 +11,13 @@ import { listContainers } from './docker.js';
 import { getRemoteDigest, getRemoteVersion } from './registry.js';
 import { digestsEqual } from './reconcile.js';
 import { isMeaningfulVersion } from './version.js';
-import { parseGitHubRepo, getLatestReleaseTag } from './changelog.js';
+import {
+  parseGitHubRepo,
+  getLatestReleaseTag,
+  getReleasesCached,
+  selectNewerReleases,
+  detectBreakingChanges,
+} from './changelog.js';
 import * as db from './db.js';
 
 const CONCURRENCY = 4;
@@ -51,6 +57,26 @@ async function releaseTagForSource(c) {
   if (!gh) return null;
   const tag = await getLatestReleaseTag(gh.owner, gh.repo);
   return isMeaningfulVersion(tag) ? tag : null;
+}
+
+/**
+ * Best-effort breaking-change scan for a container with a GitHub source:
+ * check the release notes between the running version and the newest release
+ * for breaking-change signals. Any failure means 0 — never fails the check.
+ *
+ * @param {{ sourceUrl?: string|null, currentVersion?: string|null }} c
+ * @returns {Promise<0|1>}
+ */
+async function detectBreakingForContainer(c) {
+  try {
+    const gh = parseGitHubRepo(c.sourceUrl);
+    if (!gh) return 0;
+    const releases = await getReleasesCached(gh.owner, gh.repo);
+    const newer = selectNewerReleases(releases, c.currentVersion);
+    return detectBreakingChanges(newer) ? 1 : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -120,6 +146,7 @@ export async function runCheck() {
 
         // Best-effort: only paid for images that actually have an update.
         const availableVersion = await resolveAvailableVersion(c);
+        const breaking = await detectBreakingForContainer(c);
 
         db.recordEvent({
           image: c.image,
@@ -127,6 +154,7 @@ export async function runCheck() {
           status: 'update',
           digest: remote,
           available_version: availableVersion,
+          breaking,
           raw_json: JSON.stringify({ source: 'check' }),
         });
         // Remember versions per digest: the available one keyed by the remote

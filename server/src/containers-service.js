@@ -86,6 +86,9 @@ export function buildContainerItems({
       updateAvailable,
       availableDigest,
       availableVersion,
+      // Only meaningful alongside an actual update — a stale event's flag
+      // must not leak through once the digests match again.
+      breakingRisk: !!(updateAvailable && event?.breaking),
       pinned: isPinned(c.normalizedRef),
       canRevert: !!rollback,
       rollbackVersion: rollback?.old_version ?? null,

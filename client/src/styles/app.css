@@ -1462,3 +1462,6 @@ a {
   color: var(--color-text-faint);
   white-space: nowrap;
 }
+
+.breaking-flag { margin-left: 6px; cursor: help; }
+.breaking-note { margin: 0 0 10px; font-size: 0.82rem; color: var(--color-pending); }

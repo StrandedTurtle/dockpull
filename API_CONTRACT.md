@@ -141,6 +141,18 @@ All request/response bodies are JSON unless noted otherwise.
 - Deletes **all** update-history rows.
 - Response: `200` — `{ "ok": true }`.
 
+### `POST /api/images/prune`
+
+- Auth: cookie.
+- Removes dangling images (untagged layers no container references) — the
+  leftovers that accumulate after image updates. Tagged images and anything
+  in use are never touched.
+- Response: `200` — `{ "ok": true, "deleted": number, "spaceReclaimed": number }`
+  where `deleted` is the number of image layers removed and `spaceReclaimed`
+  is in bytes.
+- `503 { "error": "docker_unavailable" }` when the Docker daemon is
+  unreachable.
+
 ### `GET /api/pinned`
 
 - Auth: cookie.
@@ -260,6 +272,10 @@ Field notes:
   image's `org.opencontainers.image.version` label; when that isn't a usable
   version (e.g. `main`/`latest`/a sha) but the image declares a GitHub source,
   falls back to that repo's latest release tag.
+- `breakingRisk` — `true` when `updateAvailable` and the release notes between
+  the running and available versions mention breaking changes (best-effort,
+  GitHub-sourced images only; scanned when the update event is recorded).
+  `false` otherwise, including when no update is available.
 - `pinned` — `true` if the image ref is in the `pinned` table ("Pin Version":
   update indicator is suppressed and the container is grouped separately, but
   a manual update is still allowed).
