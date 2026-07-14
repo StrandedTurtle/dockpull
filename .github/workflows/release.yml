@@ -4,11 +4,23 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  # Pinned-image builds for release tags arrive via dispatch, not the tag push:
+  # release-please creates its tags with GITHUB_TOKEN, and GitHub suppresses
+  # workflow triggers for events created by that token (anti-recursion) — so
+  # the `tags:` trigger above never fires for them. release-please.yml
+  # dispatches this workflow with the new tag instead (workflow_dispatch is
+  # exempt from that suppression). The tag trigger is kept for hand-pushed tags.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to build pinned images for"
+        required: true
+        type: string
 
 # Only one publish run per ref at a time; a newer push cancels an in-flight
 # build for the same ref instead of letting it hang/queue behind it.
 concurrency:
-  group: publish-${{ github.ref }}
+  group: publish-${{ inputs.tag || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -18,7 +30,10 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     steps:
+      # On dispatch, test the tag being built (empty ref = event's own ref).
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || '' }}
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -38,6 +53,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || '' }}
 
       # GHCR image names must be lowercase; the owner may not be.
       - name: Compute lowercase image name
@@ -53,10 +70,14 @@ jobs:
           # Use explicit ref checks rather than {{is_default_branch}} — the
           # repo's default branch isn't necessarily `main`, which would leave
           # a push to main with zero tags (and buildx refuses to push then).
+          # The `value=` semver entries cover dispatch (github.ref is main
+          # there, so the ref-derived semver entries produce nothing).
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}},value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
 
       # Pin a recent QEMU build. The default binfmt image lagged the toolchain
       # in node:22-alpine (gcc 15 / musl 1.2.6), and emulating those newer
