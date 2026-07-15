@@ -7,11 +7,6 @@ on:
   # pushes, so only main and PRs targeting it run CI.
   pull_request:
     branches: [main]
-  # Lets release-please.yml explicitly kick CI on its release branch: pushes
-  # made with GITHUB_TOKEN (release-please's own commits) don't trigger the
-  # `push`/`pull_request` events above, so without this the release PR would
-  # never get required checks and auto-merge would stall forever.
-  workflow_dispatch:
 
 jobs:
   server:

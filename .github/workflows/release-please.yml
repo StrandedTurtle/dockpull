@@ -33,25 +33,21 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      # Authenticate as a real user (PAT) instead of the default GITHUB_TOKEN.
+      # GitHub suppresses `push`/`pull_request`/`tags` workflow triggers for
+      # events authored by GITHUB_TOKEN (anti-recursion), which meant ci.yml
+      # never ran on the release PR and `gh pr merge --auto` below had no
+      # required checks to wait on — confirmed live: a workflow_dispatch
+      # dispatch of ci.yml produced check runs that *looked* green but GitHub's
+      # required-status-check rule didn't recognize them (merge still failed
+      # with "required status checks are expected"), because that rule only
+      # counts checks tied to a genuine pull_request event. A PAT-authored
+      # push isn't subject to the suppression, so it produces real
+      # pull_request events and ci.yml runs and satisfies the rule natively.
       - uses: googleapis/release-please-action@v5
         id: release
-
-      # release-please's commits (both the initial PR and every amend as more
-      # feat:/fix: land on main) are made with GITHUB_TOKEN, so ci.yml's
-      # `push`/`pull_request` triggers never fire for them — same suppression
-      # as the tag case below. Without this, the release PR sits with no
-      # required checks and `gh pr merge --auto` never actually completes.
-      # workflow_dispatch is exempt, so dispatch CI against the release
-      # branch's current head explicitly, every time the PR is touched.
-      - name: Run CI on the release PR
-        if: steps.release.outputs.pr != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_JSON: ${{ steps.release.outputs.pr }}
-        run: |
-          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
-          HEAD_REF=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefName -q .headRefName)
-          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_REF"
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_PAT }}
 
       - name: Auto-merge the release PR once it's open
         if: steps.release.outputs.prs_created == 'true'
