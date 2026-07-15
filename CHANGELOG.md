@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/StrandedTurtle/dockpull/compare/v1.3.1...v1.3.2) (2026-07-15)
+
+
+### Bug Fixes
+
+* use the PAT for auto-merge too, not just release-please's own commits ([#56](https://github.com/StrandedTurtle/dockpull/issues/56)) ([00c4efa](https://github.com/StrandedTurtle/dockpull/commit/00c4efa2743560a9973d0400fd1ece00993af7c9))
+
 ## [1.3.1](https://github.com/StrandedTurtle/dockpull/compare/v1.3.0...v1.3.1) (2026-07-15)
 
 
