@@ -40,6 +40,20 @@ All request/response bodies are JSON unless noted otherwise.
 - Auth: cookie (optional — never errors, reports status).
 - Response: `200 { "authenticated": boolean }`
 
+### `GET /api/status`
+
+- Auth: cookie.
+- App version + background info for the About panel and nav badges.
+- Response: `200` —
+  `{ "version": string, "lastCheck": object|null, "danglingImages": { "count": number, "totalSize": number, "checkedAt": number }|null, "serverTime": string, "timeZone": string, "serverLocalTime": string }`
+  - `lastCheck` is the summary of the most recent update check (manual or
+    scheduled), or `null` before the first one runs.
+  - `danglingImages` is set once a day by the scheduled background check
+    (see `POST /api/check` scheduling in Settings) — `null` until the first
+    scheduled run has happened. `checkedAt` is a `Date.now()` epoch ms.
+    Best-effort: a failed lookup (e.g. Docker unavailable) just leaves the
+    previous value in place rather than clearing it.
+
 ### `GET /api/containers`
 
 - Auth: cookie.
@@ -149,8 +163,12 @@ All request/response bodies are JSON unless noted otherwise.
   deleting anything, for a confirmation dialog to summarize before the user
   commits to pruning.
 - Response: `200` —
-  `{ "count": number, "totalSize": number, "images": [{ "id": string, "size": number, "created": number|null }] }`
-  where `totalSize` is in bytes and `id` is a short (12-char) image ID.
+  `{ "count": number, "totalSize": number, "images": [{ "id": string, "size": number, "created": number|null, "fromContainer": string|null }] }`
+  where `totalSize` is in bytes, `id` is a short (12-char) image ID, and
+  `fromContainer` is the name of the container this image was replaced on
+  (via its remembered rollback point), or `null` when that's unknown —
+  images left over from before the container's most recent update, or
+  pulled outside DockPull, aren't attributed.
 - `503 { "error": "docker_unavailable" }` when the Docker daemon is
   unreachable.
 

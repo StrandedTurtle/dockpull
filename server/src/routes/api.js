@@ -11,7 +11,13 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { listContainers, getContainerImageMeta, listDanglingImages, pruneDanglingImages } from '../docker.js';
+import {
+  listContainers,
+  getContainerImageMeta,
+  listDanglingImages,
+  pruneDanglingImages,
+  shortImageId,
+} from '../docker.js';
 import { buildContainerItems } from '../containers-service.js';
 import { normalizeRef } from '../reconcile.js';
 import { runCheck } from '../checker.js';
@@ -48,6 +54,7 @@ apiRouter.get('/api/status', (req, res) => {
   return res.status(200).json({
     version: APP_VERSION,
     lastCheck: db.getMeta('lastCheck'),
+    danglingImages: db.getMeta('danglingImages'),
     serverTime: now.toISOString(),
     timeZone,
     // Local HH:MM as the server sees it (what the scheduled scan compares to).
@@ -161,7 +168,18 @@ apiRouter.get('/api/images/dangling', async (req, res) => {
     console.error(`api.js: GET /api/images/dangling failed: ${err.message}`);
     return res.status(500).json({ error: 'dangling_list_failed' });
   }
-  return res.status(200).json(result);
+  // Attribute each dangling image back to the container it was replaced on,
+  // if we have a rollback point for it — so the confirmation dialog can name
+  // names instead of just a count. Images that predate the current rollback
+  // point (or were pulled outside DockPull) stay unattributed (null).
+  const sourceByImageId = new Map(
+    db.getAllRollbackPoints().map((r) => [shortImageId(r.image_id), r.container_name])
+  );
+  const images = result.images.map((img) => ({
+    ...img,
+    fromContainer: sourceByImageId.get(img.id) ?? null,
+  }));
+  return res.status(200).json({ ...result, images });
 });
 
 // Remove dangling image layers (post-update leftovers).

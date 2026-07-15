@@ -26,6 +26,15 @@ function formatBytes(n) {
   return `${value.toFixed(1)} ${units[i]}`;
 }
 
+// Container names a set of dangling images came from (deduped, sorted), plus
+// how many have no known source — dangling images that predate the current
+// rollback point, or were pulled outside DockPull, can't be attributed.
+function describePruneSources(images) {
+  const names = [...new Set(images.map((img) => img.fromContainer).filter(Boolean))].sort();
+  const unknownCount = images.length - images.filter((img) => img.fromContainer).length;
+  return { names, unknownCount };
+}
+
 // Per-target label/description/placeholder for the notification URL field.
 const NOTIFY_META = {
   discord: {
@@ -50,7 +59,7 @@ const NOTIFY_META = {
   },
 };
 
-export default function SettingsPage() {
+export default function SettingsPage({ onPruneComplete } = {}) {
   const { theme, toggle } = useTheme();
 
   const [pinned, setPinned] = useState([]);
@@ -174,13 +183,17 @@ export default function SettingsPage() {
           ? `Freed ${formatBytes(spaceReclaimed)} (${deleted} layer${deleted === 1 ? '' : 's'} removed).`
           : 'Nothing to prune — no dangling layers found.'
       );
+      if (deleted > 0) {
+        onPruneComplete?.();
+        setStatus((prev) => (prev ? { ...prev, danglingImages: { ...prev.danglingImages, count: 0 } } : prev));
+      }
     } catch (err) {
       setPruneStatus(err.message || 'Prune failed');
     } finally {
       setPruning(false);
       setPruneSummary(null);
     }
-  }, []);
+  }, [onPruneComplete]);
 
   const handleUnpin = useCallback(
     async (ref) => {
@@ -447,7 +460,10 @@ export default function SettingsPage() {
       </section>
 
       <section className="settings-section">
-        <h3>Maintenance</h3>
+        <h3>
+          Maintenance
+          {Boolean(status?.danglingImages?.count) && <span className="badge-dot" aria-hidden="true" />}
+        </h3>
         <div className="settings-row">
           <div className="settings-row-label">
             <span>Prune unused image layers</span>
@@ -474,9 +490,19 @@ export default function SettingsPage() {
         {confirmPrune && pruneSummary && (
           <ConfirmDialog
             title="Prune unused image layers?"
-            message={`This removes ${pruneSummary.count} dangling image layer${
-              pruneSummary.count === 1 ? '' : 's'
-            } (${formatBytes(pruneSummary.totalSize)}) left behind after updates. Tagged images and anything in use are never touched.`}
+            message={(() => {
+              const { names, unknownCount } = describePruneSources(pruneSummary.images || []);
+              const sourceNote = names.length
+                ? ` — from ${names.join(', ')}${
+                    unknownCount
+                      ? `, plus ${unknownCount} layer${unknownCount === 1 ? '' : 's'} from an untracked source`
+                      : ''
+                  }`
+                : '';
+              return `This removes ${pruneSummary.count} dangling image layer${
+                pruneSummary.count === 1 ? '' : 's'
+              } (${formatBytes(pruneSummary.totalSize)}) left behind after updates${sourceNote}. Tagged images and anything in use are never touched.`;
+            })()}
             confirmLabel="Prune"
             confirming={pruning}
             onConfirm={handlePrune}

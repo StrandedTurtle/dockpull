@@ -48,7 +48,7 @@ const TABS = [
 /**
  * Fixed bottom tab bar, mobile-only (hidden at >=768px via CSS in app.css).
  */
-export default function BottomNav() {
+export default function BottomNav({ needsPruning = false }) {
   return (
     <nav className="bottom-nav" aria-label="Primary">
       {TABS.map(({ to, label, Icon, end }) => (
@@ -59,7 +59,10 @@ export default function BottomNav() {
           className={({ isActive }) => `bottom-nav-tab${isActive ? ' is-active' : ''}`}
         >
           <Icon />
-          <span>{label}</span>
+          <span>
+            {label}
+            {to === '/settings' && needsPruning && <span className="badge-dot" aria-hidden="true" />}
+          </span>
         </NavLink>
       ))}
     </nav>

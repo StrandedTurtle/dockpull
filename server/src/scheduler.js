@@ -11,7 +11,7 @@
 
 import { getSettings } from './settings.js';
 import { runCheck } from './checker.js';
-import { listContainers } from './docker.js';
+import { listContainers, listDanglingImages } from './docker.js';
 import { buildContainerItems } from './containers-service.js';
 import { normalizeRef } from './reconcile.js';
 import { sendUpdates } from './notify.js';
@@ -68,6 +68,20 @@ export function selectNotifyTargets(items, unnotifiedRefs, normalizeRefFn) {
  */
 export async function runScheduledCheck() {
   await runCheck();
+
+  // Best-effort: note whether there's anything to prune, so the client can
+  // show a badge without hitting the Docker API on every page load. Never
+  // let this block the update-check/notify flow below it.
+  try {
+    const dangling = await listDanglingImages();
+    db.setMeta('danglingImages', {
+      count: dangling.count,
+      totalSize: dangling.totalSize,
+      checkedAt: Date.now(),
+    });
+  } catch (err) {
+    console.warn(`scheduler: dangling-image check failed: ${err.message}`);
+  }
 
   const settings = getSettings();
   if (!settings.discordEnabled || !settings.discordWebhookUrl) {
