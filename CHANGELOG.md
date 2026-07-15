@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/StrandedTurtle/dockpull/compare/v1.3.2...v1.3.3) (2026-07-15)
+
+
+### Bug Fixes
+
+* stop dependabot-auto-merge from showing a skipped check on every PR ([#58](https://github.com/StrandedTurtle/dockpull/issues/58)) ([cf3aca4](https://github.com/StrandedTurtle/dockpull/commit/cf3aca4ac79d8fc312296bde0144acb70b2f47c9))
+
 ## [1.3.2](https://github.com/StrandedTurtle/dockpull/compare/v1.3.1...v1.3.2) (2026-07-15)
 
 
