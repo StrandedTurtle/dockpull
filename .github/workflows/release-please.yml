@@ -22,8 +22,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  # Needed to dispatch release.yml for pinned-image builds (see below).
-  actions: write
 
 concurrency:
   group: release-please
@@ -68,13 +66,8 @@ jobs:
           gh pr merge --auto --squash --repo "$GITHUB_REPOSITORY" "$PR_NUMBER" \
             || echo "Auto-merge not enabled — turn on 'Allow auto-merge' in repo settings, or merge #$PR_NUMBER manually."
 
-      # Tags created here use GITHUB_TOKEN, and GitHub suppresses workflow
-      # triggers for events made with that token — release.yml's `tags:`
-      # trigger never fires for them. workflow_dispatch is exempt from that
-      # suppression, so kick the pinned-image build explicitly.
-      - name: Build pinned images for the new tag
-        if: steps.release.outputs.release_created == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.release.outputs.tag_name }}
-        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" -f tag="$TAG"
+      # No separate pinned-image dispatch step needed: since release-please
+      # creates the tag using the PAT (not GITHUB_TOKEN), the tag push isn't
+      # suppressed and release.yml's own `tags: ["v*"]` trigger fires on its
+      # own — confirmed live for v1.3.2, pinned :X.Y.Z/:X.Y images built and
+      # published to GHCR with no dispatch required.
