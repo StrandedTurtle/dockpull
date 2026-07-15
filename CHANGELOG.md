@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/StrandedTurtle/dockpull/compare/v1.3.3...v1.4.0) (2026-07-15)
+
+
+### Features
+
+* name containers in prune summary; badge when cleanup is available ([#63](https://github.com/StrandedTurtle/dockpull/issues/63)) ([169375a](https://github.com/StrandedTurtle/dockpull/commit/169375a16aa340f88e012bb172fefbc266d09697))
+
+
+### Bug Fixes
+
+* stop relying on fetch-metadata for Dependabot auto-merge classification ([#64](https://github.com/StrandedTurtle/dockpull/issues/64)) ([c800f9e](https://github.com/StrandedTurtle/dockpull/commit/c800f9eccb112f72315481c5aa5ee526218080d1))
+
 ## [1.3.3](https://github.com/StrandedTurtle/dockpull/compare/v1.3.2...v1.3.3) (2026-07-15)
 
 
