@@ -11,13 +11,21 @@ name: Dependabot auto-merge
 # on every PR (reported "skipped" for anyone but Dependabot, since the actor
 # filter can only live inside the job) — confusing noise on every human PR.
 # workflow_run runs don't auto-attach as a PR check the same way, so this
-# workflow simply stays invisible except for actual Dependabot PRs.
+# workflow stays invisible except for actual Dependabot runs.
 #
-# dependabot/fetch-metadata needs a real `pull_request` event context (it
-# reads github.event.pull_request internally) that workflow_run doesn't carry,
-# so the first two steps reconstruct one: resolve the PR for this run's commit,
-# then fetch that PR's full JSON and point GITHUB_EVENT_PATH/GITHUB_EVENT_NAME
-# at it for the rest of the job.
+# Classifying the update type is done by parsing the PR title's "from X to Y"
+# rather than via dependabot/fetch-metadata: that action reads
+# github.context.payload.pull_request, which a workflow_run event doesn't
+# carry. A prior version of this workflow tried building a synthetic event
+# file and pointing GITHUB_EVENT_PATH/GITHUB_EVENT_NAME at it via $GITHUB_ENV
+# — confirmed live (on real Dependabot PRs #61/#62) that this doesn't work:
+# the action always reported "Event payload missing pull_request key" despite
+# the step's logged env showing the override, i.e. GitHub Actions doesn't let
+# a later step's GITHUB_ENV write actually override those reserved variables
+# for the following step. A same-major-version "from X.. to Y.." is treated
+# as a safe patch/minor bump; anything else (a real major bump, or a
+# multi-dependency grouped-PR title with no single from/to pair to parse) is
+# left for manual review — the safe default when we can't classify it.
 
 on:
   workflow_run:
@@ -48,24 +56,18 @@ jobs:
           fi
           echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
-      - name: Build a synthetic pull_request event for fetch-metadata
+      - name: Enable auto-merge for same-major-version bumps
         if: steps.pr.outputs.number != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
-          gh api "repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}" | jq '{pull_request: .}' > "$RUNNER_TEMP/event.json"
-          echo "GITHUB_EVENT_PATH=$RUNNER_TEMP/event.json" >> "$GITHUB_ENV"
-          echo "GITHUB_EVENT_NAME=pull_request" >> "$GITHUB_ENV"
-
-      - name: Fetch Dependabot metadata
-        if: steps.pr.outputs.number != ''
-        id: meta
-        uses: dependabot/fetch-metadata@v3
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Enable auto-merge for patch/minor updates
-        if: steps.pr.outputs.number != '' && (steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor')
-        run: gh pr merge --auto --squash --repo "${{ github.repository }}" "${{ steps.pr.outputs.number }}" || echo "Auto-merge not enabled — turn on 'Allow auto-merge' in repo settings."
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json title -q .title)
+          FROM_MAJOR=$(echo "$TITLE" | grep -oP 'from v?\K\d+' | head -1)
+          TO_MAJOR=$(echo "$TITLE" | grep -oP 'to v?\K\d+' | head -1)
+          if [ -n "$FROM_MAJOR" ] && [ -n "$TO_MAJOR" ] && [ "$FROM_MAJOR" = "$TO_MAJOR" ]; then
+            gh pr merge --auto --squash --repo "${{ github.repository }}" "$PR_NUMBER" \
+              || echo "Auto-merge not enabled — turn on 'Allow auto-merge' in repo settings."
+          else
+            echo "\"$TITLE\" doesn't look like a same-major-version bump (or couldn't parse it) — leaving for manual review."
+          fi
