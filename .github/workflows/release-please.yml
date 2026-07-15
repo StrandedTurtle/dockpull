@@ -49,10 +49,19 @@ jobs:
         with:
           token: ${{ secrets.RELEASE_PLEASE_PAT }}
 
+      # Enabling auto-merge with GITHUB_TOKEN meant the merge GitHub performs
+      # later (once checks pass) is still attributed to GITHUB_TOKEN, so that
+      # merge push was ALSO suppressed — confirmed live: PR #52 and #55 both
+      # auto-merged silently with no follow-up release-please run, and their
+      # GitHub Releases only got published as a side effect of a later,
+      # unrelated push. Use the PAT here too so the actual merge fires a real
+      # push event and the next release-please run (which publishes the tag +
+      # GitHub Release) happens immediately, not whenever some other push
+      # happens to catch up on the backlog.
       - name: Auto-merge the release PR once it's open
         if: steps.release.outputs.prs_created == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
           PR_JSON: ${{ steps.release.outputs.pr }}
         run: |
           PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
