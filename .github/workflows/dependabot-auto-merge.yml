@@ -5,8 +5,24 @@ name: Dependabot auto-merge
 # review. Requires the repo setting "Allow auto-merge" to be enabled, and a
 # branch-protection rule on main that requires the CI checks (so auto-merge
 # actually waits for them).
+#
+# Triggered by ci.yml completing (workflow_run) rather than pull_request_target
+# directly: a pull_request_target trigger unconditionally shows up as a check
+# on every PR (reported "skipped" for anyone but Dependabot, since the actor
+# filter can only live inside the job) — confusing noise on every human PR.
+# workflow_run runs don't auto-attach as a PR check the same way, so this
+# workflow simply stays invisible except for actual Dependabot PRs.
+#
+# dependabot/fetch-metadata needs a real `pull_request` event context (it
+# reads github.event.pull_request internally) that workflow_run doesn't carry,
+# so the first two steps reconstruct one: resolve the PR for this run's commit,
+# then fetch that PR's full JSON and point GITHUB_EVENT_PATH/GITHUB_EVENT_NAME
+# at it for the rest of the job.
 
-on: pull_request_target
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 permissions:
   contents: write
@@ -14,18 +30,42 @@ permissions:
 
 jobs:
   auto-merge:
-    if: github.actor == 'dependabot[bot]'
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve the pull request for this run
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls" --jq '.[0].number')
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No open PR found for this run's commit — nothing to do."
+            exit 0
+          fi
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Build a synthetic pull_request event for fetch-metadata
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}" | jq '{pull_request: .}' > "$RUNNER_TEMP/event.json"
+          echo "GITHUB_EVENT_PATH=$RUNNER_TEMP/event.json" >> "$GITHUB_ENV"
+          echo "GITHUB_EVENT_NAME=pull_request" >> "$GITHUB_ENV"
+
       - name: Fetch Dependabot metadata
+        if: steps.pr.outputs.number != ''
         id: meta
         uses: dependabot/fetch-metadata@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enable auto-merge for patch/minor updates
-        if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
-        run: gh pr merge --auto --squash "$PR_URL" || echo "Auto-merge not enabled — turn on 'Allow auto-merge' in repo settings."
+        if: steps.pr.outputs.number != '' && (steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor')
+        run: gh pr merge --auto --squash --repo "${{ github.repository }}" "${{ steps.pr.outputs.number }}" || echo "Auto-merge not enabled — turn on 'Allow auto-merge' in repo settings."
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
