@@ -45,7 +45,7 @@ const MoonIcon = () => (
  * `onLoggedOut` is called after the server session is cleared so App can
  * flip back to the AuthPage.
  */
-export default function Header({ pendingCount = 0, onLoggedOut }) {
+export default function Header({ pendingCount = 0, needsPruning = false, onLoggedOut }) {
   const [loggingOut, setLoggingOut] = useState(false);
   const { theme, toggle } = useTheme();
 
@@ -78,6 +78,7 @@ export default function Header({ pendingCount = 0, onLoggedOut }) {
         </NavLink>
         <NavLink to="/settings" className={({ isActive }) => `header-nav-link${isActive ? ' is-active' : ''}`}>
           Settings
+          {needsPruning && <span className="badge-dot" aria-hidden="true" />}
         </NavLink>
       </nav>
       <div className="header-actions">

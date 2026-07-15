@@ -797,6 +797,18 @@ export async function getContainerImageMeta(name) {
 }
 
 /**
+ * Normalizes a Docker image ID (`sha256:<64-hex>` or already-short) down to
+ * the 12-char short form used for display and for matching a dangling image
+ * back to the rollback point that recorded it (see routes/api.js).
+ *
+ * @param {string} id
+ * @returns {string}
+ */
+export function shortImageId(id) {
+  return (id || '').replace(/^sha256:/, '').slice(0, 12);
+}
+
+/**
  * List dangling images (untagged layers no container references) without
  * deleting anything — a dry-run preview for the prune confirmation dialog,
  * so the user knows what they're about to remove before they remove it.
@@ -806,7 +818,7 @@ export async function getContainerImageMeta(name) {
 export async function listDanglingImages() {
   const images = await docker.listImages({ filters: { dangling: ['true'] } });
   const list = images.map((img) => ({
-    id: (img.Id || '').replace(/^sha256:/, '').slice(0, 12),
+    id: shortImageId(img.Id),
     size: img.Size ?? 0,
     created: img.Created ?? null,
   }));

@@ -322,6 +322,18 @@ a {
   color: var(--color-text-muted);
 }
 
+/* Small unlabelled dot — "there's something here worth a look" (nav links,
+   section headings) as opposed to `.badge`'s numeric count. */
+.badge-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  vertical-align: middle;
+}
+
 /* ---------- Dashboard ---------- */
 
 .dashboard-header {

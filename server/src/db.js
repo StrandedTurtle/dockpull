@@ -124,6 +124,9 @@ const stmts = {
   getRollbackPoint: db.prepare(`
     SELECT * FROM rollback_points WHERE container_name = ? LIMIT 1
   `),
+  getAllRollbackPoints: db.prepare(`
+    SELECT container_name, image_id FROM rollback_points
+  `),
   deleteRollbackPoint: db.prepare(`
     DELETE FROM rollback_points WHERE container_name = ?
   `),
@@ -247,6 +250,16 @@ export function getRollbackPoint(container_name) {
 
 export function deleteRollbackPoint(container_name) {
   return stmts.deleteRollbackPoint.run(container_name);
+}
+
+/**
+ * Every container's remembered previous image ID (container_name, image_id
+ * pairs only) — used to attribute a dangling image back to the container it
+ * was replaced on, for the prune preview. One row per container (the most
+ * recent update only); see setRollbackPoint.
+ */
+export function getAllRollbackPoints() {
+  return stmts.getAllRollbackPoints.all();
 }
 
 export function recordUpdate({ container_name, image, old_digest, new_digest, status, message }) {

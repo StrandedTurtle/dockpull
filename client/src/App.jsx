@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { getMe, setUnauthorizedHandler } from './api.js';
+import { getMe, getStatus, setUnauthorizedHandler } from './api.js';
 import { useTheme } from './hooks/useTheme.js';
 import AuthPage from './AuthPage.jsx';
 import Dashboard from './Dashboard.jsx';
@@ -18,6 +18,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [needsPruning, setNeedsPruning] = useState(false);
 
   const checkSession = useCallback(async () => {
     try {
@@ -32,6 +33,16 @@ export default function App() {
     setLoading(true);
     checkSession().finally(() => setLoading(false));
   }, [checkSession]);
+
+  // Once-daily background check also looks for prunable image layers; pick
+  // that up on load so the Settings nav/section can show a badge without
+  // hitting the Docker API itself.
+  useEffect(() => {
+    if (!authenticated) return;
+    getStatus()
+      .then((s) => setNeedsPruning(Boolean(s?.danglingImages?.count)))
+      .catch(() => {});
+  }, [authenticated]);
 
   // If any authenticated request 401s (session expired mid-use), drop straight
   // back to the sign-in gate instead of stranding the user on a broken page.
@@ -74,16 +85,19 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Header pendingCount={pendingCount} onLoggedOut={handleLoggedOut} />
+      <Header pendingCount={pendingCount} needsPruning={needsPruning} onLoggedOut={handleLoggedOut} />
       <main className="app-main">
         <Routes>
           <Route path="/" element={<Dashboard onPendingCountChange={setPendingCount} />} />
           <Route path="/history" element={<HistoryPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route
+            path="/settings"
+            element={<SettingsPage onPruneComplete={() => setNeedsPruning(false)} />}
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      <BottomNav />
+      <BottomNav needsPruning={needsPruning} />
     </div>
   );
 }
