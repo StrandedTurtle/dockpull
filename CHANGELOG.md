@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/StrandedTurtle/dockpull/compare/v1.3.0...v1.3.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* authenticate release-please with a PAT for real pull_request events ([#54](https://github.com/StrandedTurtle/dockpull/issues/54)) ([ae02ec9](https://github.com/StrandedTurtle/dockpull/commit/ae02ec9ccef473b4984fda5edb58f314ba920834))
+
 ## [1.3.0](https://github.com/StrandedTurtle/dockpull/compare/v1.2.0...v1.3.0) (2026-07-15)
 
 
