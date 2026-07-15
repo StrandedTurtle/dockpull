@@ -141,6 +141,19 @@ All request/response bodies are JSON unless noted otherwise.
 - Deletes **all** update-history rows.
 - Response: `200` — `{ "ok": true }`.
 
+### `GET /api/images/dangling`
+
+- Auth: cookie.
+- Dry-run preview of what `POST /api/images/prune` would remove — lists
+  dangling images (untagged layers no container references) without
+  deleting anything, for a confirmation dialog to summarize before the user
+  commits to pruning.
+- Response: `200` —
+  `{ "count": number, "totalSize": number, "images": [{ "id": string, "size": number, "created": number|null }] }`
+  where `totalSize` is in bytes and `id` is a short (12-char) image ID.
+- `503 { "error": "docker_unavailable" }` when the Docker daemon is
+  unreachable.
+
 ### `POST /api/images/prune`
 
 - Auth: cookie.

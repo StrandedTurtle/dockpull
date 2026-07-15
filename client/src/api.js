@@ -131,6 +131,11 @@ export function clearHistory() {
 
 // --- Maintenance ---
 
+// Dry-run preview of a prune. Returns { count, totalSize, images }.
+export function getDanglingImages() {
+  return get('/images/dangling');
+}
+
 // Remove dangling image layers. Returns { ok, deleted, spaceReclaimed }.
 export function pruneImages() {
   return post('/images/prune');
