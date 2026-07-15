@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.0](https://github.com/StrandedTurtle/dockpull/compare/v1.2.0...v1.3.0) (2026-07-15)
+
+
+### Features
+
+* prune confirmation shows a real image summary; fix release CI gap ([#51](https://github.com/StrandedTurtle/dockpull/issues/51)) ([aa51548](https://github.com/StrandedTurtle/dockpull/commit/aa51548984edf99f4d91af67be90055bea8c7161))
+
+
+### Bug Fixes
+
+* pass --repo to gh pr merge in release-please auto-merge step ([#53](https://github.com/StrandedTurtle/dockpull/issues/53)) ([d52674f](https://github.com/StrandedTurtle/dockpull/commit/d52674fed24b18f192b0da3496fa516e1920192d))
+
 ## [1.2.0](https://github.com/StrandedTurtle/dockpull/compare/v1.1.0...v1.2.0) (2026-07-14)
 
 
