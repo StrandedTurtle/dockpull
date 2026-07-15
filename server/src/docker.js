@@ -797,6 +797,27 @@ export async function getContainerImageMeta(name) {
 }
 
 /**
+ * List dangling images (untagged layers no container references) without
+ * deleting anything — a dry-run preview for the prune confirmation dialog,
+ * so the user knows what they're about to remove before they remove it.
+ *
+ * @returns {Promise<{ count: number, totalSize: number, images: Array<{ id: string, size: number, created: number }> }>}
+ */
+export async function listDanglingImages() {
+  const images = await docker.listImages({ filters: { dangling: ['true'] } });
+  const list = images.map((img) => ({
+    id: (img.Id || '').replace(/^sha256:/, '').slice(0, 12),
+    size: img.Size ?? 0,
+    created: img.Created ?? null,
+  }));
+  return {
+    count: list.length,
+    totalSize: list.reduce((sum, img) => sum + img.size, 0),
+    images: list,
+  };
+}
+
+/**
  * Remove dangling images (untagged layers no container references) —
  * the leftovers that accumulate after image updates. Safe: never touches
  * tagged images or anything in use.

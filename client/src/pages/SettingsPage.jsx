@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { get, getPinned, unpin, getSettings, updateSettings, testNotify, getStatus, pruneImages } from '../api.js';
+import {
+  get,
+  getPinned,
+  unpin,
+  getSettings,
+  updateSettings,
+  testNotify,
+  getStatus,
+  getDanglingImages,
+  pruneImages,
+} from '../api.js';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { useTheme } from '../hooks/useTheme.js';
 
@@ -59,6 +69,8 @@ export default function SettingsPage() {
   const [confirmPrune, setConfirmPrune] = useState(false);
   const [pruning, setPruning] = useState(false);
   const [pruneStatus, setPruneStatus] = useState('');
+  const [pruneSummaryLoading, setPruneSummaryLoading] = useState(false);
+  const [pruneSummary, setPruneSummary] = useState(null);
 
   const [health, setHealth] = useState(null); // null = unknown, true/false once checked
   const [status, setStatus] = useState(null); // { version, serverLocalTime, timeZone }
@@ -133,6 +145,24 @@ export default function SettingsPage() {
     }
   }, [webhookDraft, settings, saveSetting]);
 
+  const handlePruneClick = useCallback(async () => {
+    setPruneStatus('');
+    setPruneSummaryLoading(true);
+    try {
+      const summary = (await getDanglingImages()) || { count: 0, totalSize: 0 };
+      if (!summary.count) {
+        setPruneStatus('Nothing to prune — no dangling layers found.');
+        return;
+      }
+      setPruneSummary(summary);
+      setConfirmPrune(true);
+    } catch (err) {
+      setPruneStatus(err.message || 'Failed to check for dangling layers');
+    } finally {
+      setPruneSummaryLoading(false);
+    }
+  }, []);
+
   const handlePrune = useCallback(async () => {
     setConfirmPrune(false);
     setPruning(true);
@@ -148,6 +178,7 @@ export default function SettingsPage() {
       setPruneStatus(err.message || 'Prune failed');
     } finally {
       setPruning(false);
+      setPruneSummary(null);
     }
   }, []);
 
@@ -428,10 +459,10 @@ export default function SettingsPage() {
           <button
             type="button"
             className="btn btn-sm"
-            onClick={() => setConfirmPrune(true)}
-            disabled={pruning}
+            onClick={handlePruneClick}
+            disabled={pruning || pruneSummaryLoading}
           >
-            {pruning && <span className="spinner" aria-hidden="true" />}
+            {(pruning || pruneSummaryLoading) && <span className="spinner" aria-hidden="true" />}
             Prune now
           </button>
         </div>
@@ -440,14 +471,19 @@ export default function SettingsPage() {
             <span className="settings-test-status">{pruneStatus}</span>
           </div>
         )}
-        {confirmPrune && (
+        {confirmPrune && pruneSummary && (
           <ConfirmDialog
             title="Prune unused image layers?"
-            message="This removes dangling image layers left behind after updates. Tagged images and anything in use are never touched."
+            message={`This removes ${pruneSummary.count} dangling image layer${
+              pruneSummary.count === 1 ? '' : 's'
+            } (${formatBytes(pruneSummary.totalSize)}) left behind after updates. Tagged images and anything in use are never touched.`}
             confirmLabel="Prune"
             confirming={pruning}
             onConfirm={handlePrune}
-            onCancel={() => setConfirmPrune(false)}
+            onCancel={() => {
+              setConfirmPrune(false);
+              setPruneSummary(null);
+            }}
           />
         )}
       </section>
