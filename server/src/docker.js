@@ -845,4 +845,36 @@ export async function pruneDanglingImages() {
   };
 }
 
+/**
+ * Remove only the specified dangling images (by short ID), leaving any the
+ * user excluded from the prune in place. Re-lists dangling images and removes
+ * exclusively those that are BOTH still dangling AND in the requested set —
+ * so a tagged/in-use image can never be caught even if a stale ID is passed,
+ * and images that stopped being dangling since the preview are skipped.
+ * Removals are best-effort per image: one failure is logged and doesn't abort
+ * the rest.
+ *
+ * @param {string[]} ids - short (12-char) image IDs to remove.
+ * @returns {Promise<{ deleted: number, spaceReclaimed: number }>}
+ */
+export async function removeDanglingImages(ids) {
+  const wanted = new Set((ids || []).map(shortImageId));
+  if (wanted.size === 0) return { deleted: 0, spaceReclaimed: 0 };
+
+  const images = await docker.listImages({ filters: { dangling: ['true'] } });
+  let deleted = 0;
+  let spaceReclaimed = 0;
+  for (const img of images) {
+    if (!wanted.has(shortImageId(img.Id))) continue;
+    try {
+      await docker.getImage(img.Id).remove();
+      deleted += 1;
+      spaceReclaimed += img.Size ?? 0;
+    } catch (err) {
+      console.warn(`docker.js: failed to remove image ${shortImageId(img.Id)}: ${err.message}`);
+    }
+  }
+  return { deleted, spaceReclaimed };
+}
+
 export { docker };

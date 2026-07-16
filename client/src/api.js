@@ -136,9 +136,11 @@ export function getDanglingImages() {
   return get('/images/dangling');
 }
 
-// Remove dangling image layers. Returns { ok, deleted, spaceReclaimed }.
-export function pruneImages() {
-  return post('/images/prune');
+// Remove dangling image layers. Pass an array of short image IDs to remove
+// only those (letting the caller exclude some); omit to prune every dangling
+// layer. Returns { ok, deleted, spaceReclaimed }.
+export function pruneImages(ids) {
+  return post('/images/prune', Array.isArray(ids) ? { ids } : {});
 }
 
 // --- Pinning ---

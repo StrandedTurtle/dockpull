@@ -178,6 +178,12 @@ All request/response bodies are JSON unless noted otherwise.
 - Removes dangling images (untagged layers no container references) — the
   leftovers that accumulate after image updates. Tagged images and anything
   in use are never touched.
+- Body (optional): `{ "ids": [string, …] }` — short (12-char) image IDs from
+  `GET /api/images/dangling`. When present, only those images are removed
+  (the confirmation dialog uses this to let the user exclude individual
+  layers); each ID is re-checked against the current dangling set before
+  removal, so a stale or non-dangling ID is silently skipped. With no body
+  (or no `ids`), every dangling layer is pruned.
 - Response: `200` — `{ "ok": true, "deleted": number, "spaceReclaimed": number }`
   where `deleted` is the number of image layers removed and `spaceReclaimed`
   is in bytes.
