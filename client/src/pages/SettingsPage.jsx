@@ -26,15 +26,6 @@ function formatBytes(n) {
   return `${value.toFixed(1)} ${units[i]}`;
 }
 
-// Container names a set of dangling images came from (deduped, sorted), plus
-// how many have no known source — dangling images that predate the current
-// rollback point, or were pulled outside DockPull, can't be attributed.
-function describePruneSources(images) {
-  const names = [...new Set(images.map((img) => img.fromContainer).filter(Boolean))].sort();
-  const unknownCount = images.length - images.filter((img) => img.fromContainer).length;
-  return { names, unknownCount };
-}
-
 // Per-target label/description/placeholder for the notification URL field.
 const NOTIFY_META = {
   discord: {
@@ -79,7 +70,10 @@ export default function SettingsPage({ onPruneComplete } = {}) {
   const [pruning, setPruning] = useState(false);
   const [pruneStatus, setPruneStatus] = useState('');
   const [pruneSummaryLoading, setPruneSummaryLoading] = useState(false);
-  const [pruneSummary, setPruneSummary] = useState(null);
+  // The dangling images still selected for pruning. Starts as the full fetched
+  // list; the user can drop rows (which then just reappear next time, since
+  // they're never removed). Drives both the table and what gets pruned.
+  const [pruneSelection, setPruneSelection] = useState([]);
 
   const [health, setHealth] = useState(null); // null = unknown, true/false once checked
   const [status, setStatus] = useState(null); // { version, serverLocalTime, timeZone }
@@ -158,12 +152,12 @@ export default function SettingsPage({ onPruneComplete } = {}) {
     setPruneStatus('');
     setPruneSummaryLoading(true);
     try {
-      const summary = (await getDanglingImages()) || { count: 0, totalSize: 0 };
+      const summary = (await getDanglingImages()) || { count: 0, images: [] };
       if (!summary.count) {
         setPruneStatus('Nothing to prune — no dangling layers found.');
         return;
       }
-      setPruneSummary(summary);
+      setPruneSelection(summary.images || []);
       setConfirmPrune(true);
     } catch (err) {
       setPruneStatus(err.message || 'Failed to check for dangling layers');
@@ -172,12 +166,19 @@ export default function SettingsPage({ onPruneComplete } = {}) {
     }
   }, []);
 
+  // Drop a layer from this prune. It isn't removed, so it reappears the next
+  // time the dialog is opened (which re-fetches the current dangling set).
+  const excludePruneImage = useCallback((id) => {
+    setPruneSelection((sel) => sel.filter((img) => img.id !== id));
+  }, []);
+
   const handlePrune = useCallback(async () => {
+    const ids = pruneSelection.map((img) => img.id);
     setConfirmPrune(false);
     setPruning(true);
     setPruneStatus('');
     try {
-      const { deleted = 0, spaceReclaimed = 0 } = (await pruneImages()) || {};
+      const { deleted = 0, spaceReclaimed = 0 } = (await pruneImages(ids)) || {};
       setPruneStatus(
         deleted > 0
           ? `Freed ${formatBytes(spaceReclaimed)} (${deleted} layer${deleted === 1 ? '' : 's'} removed).`
@@ -191,9 +192,9 @@ export default function SettingsPage({ onPruneComplete } = {}) {
       setPruneStatus(err.message || 'Prune failed');
     } finally {
       setPruning(false);
-      setPruneSummary(null);
+      setPruneSelection([]);
     }
-  }, [onPruneComplete]);
+  }, [onPruneComplete, pruneSelection]);
 
   const handleUnpin = useCallback(
     async (ref) => {
@@ -487,30 +488,77 @@ export default function SettingsPage({ onPruneComplete } = {}) {
             <span className="settings-test-status">{pruneStatus}</span>
           </div>
         )}
-        {confirmPrune && pruneSummary && (
+        {confirmPrune && (
           <ConfirmDialog
             title="Prune unused image layers?"
-            message={(() => {
-              const { names, unknownCount } = describePruneSources(pruneSummary.images || []);
-              const sourceNote = names.length
-                ? ` — from ${names.join(', ')}${
-                    unknownCount
-                      ? `, plus ${unknownCount} layer${unknownCount === 1 ? '' : 's'} from an untracked source`
-                      : ''
-                  }`
-                : '';
-              return `This removes ${pruneSummary.count} dangling image layer${
-                pruneSummary.count === 1 ? '' : 's'
-              } (${formatBytes(pruneSummary.totalSize)}) left behind after updates${sourceNote}. Tagged images and anything in use are never touched.`;
-            })()}
-            confirmLabel="Prune"
+            dialogClassName="confirm-dialog--wide"
+            confirmLabel={
+              pruneSelection.length
+                ? `Prune ${pruneSelection.length} (${formatBytes(
+                    pruneSelection.reduce((sum, img) => sum + (img.size || 0), 0)
+                  )})`
+                : 'Prune'
+            }
             confirming={pruning}
+            confirmDisabled={pruneSelection.length === 0}
             onConfirm={handlePrune}
             onCancel={() => {
               setConfirmPrune(false);
-              setPruneSummary(null);
+              setPruneSelection([]);
             }}
-          />
+          >
+            <p className="confirm-message">
+              Leftover layers from image updates. Remove any row with ✕ to keep that layer —
+              it'll reappear here next time. Tagged images and anything in use are never touched.
+            </p>
+            {pruneSelection.length === 0 ? (
+              <p className="prune-empty">All layers excluded — nothing will be pruned.</p>
+            ) : (
+              <div className="prune-table-scroll">
+                <table className="prune-table">
+                  <thead>
+                    <tr>
+                      <th>Layer</th>
+                      <th className="prune-size">Size</th>
+                      <th aria-label="Exclude" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pruneSelection.map((img) => (
+                      <tr key={img.id}>
+                        <td>
+                          <span className="prune-source">
+                            {img.fromContainer || 'Untracked source'}
+                          </span>
+                          <span className="prune-source-id">{img.id}</span>
+                        </td>
+                        <td className="prune-size">{formatBytes(img.size || 0)}</td>
+                        <td className="prune-remove-cell">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-icon prune-row-remove"
+                            onClick={() => excludePruneImage(img.id)}
+                            disabled={pruning}
+                            aria-label={`Exclude ${img.fromContainer || img.id} from prune`}
+                            title="Exclude from prune"
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <path
+                                d="M6 6l12 12M18 6L6 18"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </ConfirmDialog>
         )}
       </section>
 

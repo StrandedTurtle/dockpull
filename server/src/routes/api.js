@@ -16,6 +16,7 @@ import {
   getContainerImageMeta,
   listDanglingImages,
   pruneDanglingImages,
+  removeDanglingImages,
   shortImageId,
 } from '../docker.js';
 import { buildContainerItems } from '../containers-service.js';
@@ -182,11 +183,19 @@ apiRouter.get('/api/images/dangling', async (req, res) => {
   return res.status(200).json({ ...result, images });
 });
 
-// Remove dangling image layers (post-update leftovers).
+// Remove dangling image layers (post-update leftovers). With a body of
+// `{ ids: [...] }` (short image IDs from GET /api/images/dangling), removes
+// only those — letting the confirmation dialog exclude individual layers.
+// With no `ids` it falls back to pruning every dangling layer.
 apiRouter.post('/api/images/prune', async (req, res) => {
+  const ids = req.body?.ids;
   let result;
   try {
-    result = await pruneDanglingImages();
+    if (Array.isArray(ids)) {
+      result = await removeDanglingImages(ids.filter((id) => typeof id === 'string'));
+    } else {
+      result = await pruneDanglingImages();
+    }
   } catch (err) {
     if (err.code === 'ENOENT' || err.code === 'ECONNREFUSED') {
       return res.status(503).json({ error: 'docker_unavailable' });
