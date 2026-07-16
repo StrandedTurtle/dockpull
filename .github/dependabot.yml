@@ -8,6 +8,13 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    # `fix(deps): …` so release-please treats a bump as a patch and cuts a
+    # release for it. Its default `build(deps)` type isn't release-worthy
+    # (only feat/fix/perf bump), so dependency updates would land on main and
+    # never ship a new tagged image/release.
+    commit-message:
+      prefix: "fix"
+      include: "scope"
 
   # Server npm deps. Group safe minor+patch bumps into a single PR (auto-merged
   # once CI is green); majors come as individual PRs for manual review.
@@ -18,6 +25,9 @@ updates:
     groups:
       server-minor-patch:
         update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "fix"
+      include: "scope"
 
   # Client npm deps — same grouping strategy.
   - package-ecosystem: npm
@@ -27,3 +37,6 @@ updates:
     groups:
       client-minor-patch:
         update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "fix"
+      include: "scope"
