@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/StrandedTurtle/dockpull/compare/v1.5.0...v1.5.1) (2026-07-16)
+
+
+### Bug Fixes
+
+* give Dependabot a fix() commit prefix so dependency bumps auto-release ([#68](https://github.com/StrandedTurtle/dockpull/issues/68)) ([ef9102a](https://github.com/StrandedTurtle/dockpull/commit/ef9102a6a0c8ca2c7dd573220ba2df2da4ecc0c0))
+
 ## [1.5.0](https://github.com/StrandedTurtle/dockpull/compare/v1.4.0...v1.5.0) (2026-07-16)
 
 
