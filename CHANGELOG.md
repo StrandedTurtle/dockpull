@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/StrandedTurtle/dockpull/compare/v1.4.0...v1.5.0) (2026-07-16)
+
+
+### Features
+
+* prune dialog lists each image in a table with per-row exclude ([#66](https://github.com/StrandedTurtle/dockpull/issues/66)) ([5e3a2a6](https://github.com/StrandedTurtle/dockpull/commit/5e3a2a6a8418573e2f674386089c92b1a09d1326))
+
 ## [1.4.0](https://github.com/StrandedTurtle/dockpull/compare/v1.3.3...v1.4.0) (2026-07-15)
 
 
