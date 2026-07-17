@@ -82,7 +82,8 @@ function ChangelogContent({ data }) {
     if (!data.releases.length) {
       return (
         <p className="changelog-empty">
-          No newer release notes found.{' '}
+          No newer release notes found — the image may have been rebuilt without a new source
+          release (e.g. a base image or dependency refresh).{' '}
           <a href={data.releasesUrl} target="_blank" rel="noopener noreferrer">
             View releases
           </a>
