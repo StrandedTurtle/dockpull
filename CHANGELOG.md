@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.2](https://github.com/StrandedTurtle/dockpull/compare/v1.5.1...v1.5.2) (2026-07-17)
+
+
+### Bug Fixes
+
+* clarify changelog empty-state for update-without-a-new-release ([#71](https://github.com/StrandedTurtle/dockpull/issues/71)) ([2c32e6a](https://github.com/StrandedTurtle/dockpull/commit/2c32e6ab32cefaf3a1a278494b80e501deecd9f4))
+* **deps-dev:** bump vite in /client in the client-minor-patch group ([#70](https://github.com/StrandedTurtle/dockpull/issues/70)) ([3b6df68](https://github.com/StrandedTurtle/dockpull/commit/3b6df683df1ca543dd613fb2cb26b84e70c53963))
+
 ## [1.5.1](https://github.com/StrandedTurtle/dockpull/compare/v1.5.0...v1.5.1) (2026-07-16)
 
 
