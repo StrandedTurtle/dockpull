@@ -162,6 +162,11 @@ the session cookie is marked `Secure`.
 - **Image tags:** `:latest` tracks `main`; version tags (`:1.0.0`, `:1.0`) are cut per
   release for pinning. If a host can't pull, the GHCR package may be private — make it
   public or `docker login ghcr.io`.
+- **Pulled `:latest` but the version in Settings didn't change?** Give it a few minutes —
+  release-please's version-bump commit lands right behind the feature commit it releases,
+  and `:latest` rebuilds from whichever one finishes last. If it's still stale after that,
+  compare `docker inspect ghcr.io/strandedturtle/dockpull:latest --format '{{.Id}}'`
+  against the pinned `:X.Y.Z` tag for the version you expect — they should match.
 
 ---
 DISCLAIMER: This project was made using Claude
