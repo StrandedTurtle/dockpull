@@ -26,6 +26,23 @@ function formatBytes(n) {
   return `${value.toFixed(1)} ${units[i]}`;
 }
 
+// Rough relative age for an image's creation time (Docker's `created` is Unix
+// seconds). Helps explain why some dangling layers show "Untracked source" —
+// e.g. an old layer from a container's earlier update, before its rollback
+// point got overwritten by a more recent one.
+function formatAge(createdSeconds) {
+  if (!Number.isFinite(createdSeconds)) return '—';
+  const ms = Date.now() - createdSeconds * 1000;
+  const days = Math.floor(ms / 86400000);
+  if (days < 1) return 'today';
+  if (days === 1) return '1 day ago';
+  if (days < 30) return `${days} days ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? '' : 's'} ago`;
+  const years = Math.floor(days / 365);
+  return `${years} year${years === 1 ? '' : 's'} ago`;
+}
+
 // Per-target label/description/placeholder for the notification URL field.
 const NOTIFY_META = {
   discord: {
@@ -520,6 +537,7 @@ export default function SettingsPage({ onPruneComplete } = {}) {
                     <tr>
                       <th>Layer</th>
                       <th className="prune-size">Size</th>
+                      <th className="prune-created">Created</th>
                       <th aria-label="Exclude" />
                     </tr>
                   </thead>
@@ -533,6 +551,7 @@ export default function SettingsPage({ onPruneComplete } = {}) {
                           <span className="prune-source-id">{img.id}</span>
                         </td>
                         <td className="prune-size">{formatBytes(img.size || 0)}</td>
+                        <td className="prune-created">{formatAge(img.created)}</td>
                         <td className="prune-remove-cell">
                           <button
                             type="button"
