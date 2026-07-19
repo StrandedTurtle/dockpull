@@ -257,6 +257,12 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
+.prune-table .prune-created {
+  text-align: right;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
 .prune-table .prune-remove-cell {
   width: 1%;
   text-align: right;
