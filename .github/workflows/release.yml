@@ -4,12 +4,10 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-  # Pinned-image builds for release tags arrive via dispatch, not the tag push:
-  # release-please creates its tags with GITHUB_TOKEN, and GitHub suppresses
-  # workflow triggers for events created by that token (anti-recursion) — so
-  # the `tags:` trigger above never fires for them. release-please.yml
-  # dispatches this workflow with the new tag instead (workflow_dispatch is
-  # exempt from that suppression). The tag trigger is kept for hand-pushed tags.
+  # release-please creates its tags with a PAT (not GITHUB_TOKEN), so that tag
+  # push isn't subject to GitHub's anti-recursion trigger suppression and the
+  # `tags:` rule above fires on its own — no dispatch needed. Kept for anyone
+  # who wants to manually rebuild pinned images from an existing tag.
   workflow_dispatch:
     inputs:
       tag:
@@ -17,11 +15,21 @@ on:
         required: true
         type: string
 
-# Only one publish run per ref at a time; a newer push cancels an in-flight
-# build for the same ref instead of letting it hang/queue behind it.
+# One publish run per ref at a time, but let a superseded run finish rather
+# than cancelling it (cancel-in-progress: false). release-please's auto-merge
+# means the release-bump commit almost always lands on `main` seconds behind
+# the feature commit it bundles — two pushes to the same ref within the same
+# concurrency window. With cancel-in-progress: true, whichever of those two
+# runs happened to be mid-flight when the other queued got killed, and if
+# that was the *later* (release-bump) commit's run, `:latest` stayed built
+# from the pre-bump commit until some unrelated future push rebuilt it —
+# confirmed live: v1.6.0's `:latest` build was cancelled this way, leaving
+# GHCR's `:latest` several commits stale (right features, wrong version
+# label) with no error surfaced anywhere. Queueing instead of cancelling
+# costs a redundant build occasionally; it never leaves `:latest` wrong.
 concurrency:
   group: publish-${{ inputs.tag || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   # Gate the image publish on the same tests CI runs, so a red test never
