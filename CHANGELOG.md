@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/StrandedTurtle/dockpull/compare/v1.5.2...v1.6.0) (2026-07-19)
+
+
+### Features
+
+* show layer age in prune table ([d570b1f](https://github.com/StrandedTurtle/dockpull/commit/d570b1f0628521f7290593a0eb8f3a467ee30e1e))
+* show layer age in prune table ([822f82b](https://github.com/StrandedTurtle/dockpull/commit/822f82b7c9e2f738fe00b703ffaf3f392685f9ae))
+
 ## [1.5.2](https://github.com/StrandedTurtle/dockpull/compare/v1.5.1...v1.5.2) (2026-07-17)
 
 
