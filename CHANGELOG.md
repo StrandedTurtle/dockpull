@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.1](https://github.com/StrandedTurtle/dockpull/compare/v1.6.0...v1.6.1) (2026-07-19)
+
+
+### Bug Fixes
+
+* don't cancel in-flight :latest builds on release-please's follow-up push ([047e6ef](https://github.com/StrandedTurtle/dockpull/commit/047e6efded0e5d14cf5bd55b8422b82b9c4d30ad))
+* don't cancel in-flight :latest builds on release-please's follow-up push ([d7cf7dc](https://github.com/StrandedTurtle/dockpull/commit/d7cf7dcca1575498e56321d8aa86780554dd3b13))
+
 ## [1.6.0](https://github.com/StrandedTurtle/dockpull/compare/v1.5.2...v1.6.0) (2026-07-19)
 
 
