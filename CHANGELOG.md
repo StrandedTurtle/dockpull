@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.6.2](https://github.com/StrandedTurtle/dockpull/compare/v1.6.1...v1.6.2) (2026-09-14)
+
+
+### Bug Fixes
+
+* **deps-dev:** bump browserslist from 4.28.4 to 4.28.8 in /client ([#90](https://github.com/StrandedTurtle/dockpull/issues/90)) ([5a5b82e](https://github.com/StrandedTurtle/dockpull/commit/5a5b82e3c2ee427ef67dea275512495af0b86b9e))
+* **deps-dev:** bump fast-uri from 3.1.2 to 3.1.4 in /client ([#80](https://github.com/StrandedTurtle/dockpull/issues/80)) ([06184da](https://github.com/StrandedTurtle/dockpull/commit/06184da3e1e4d4d1e9da41a85f2183904efd6031))
+* **deps-dev:** bump fast-uri from 3.1.4 to 3.1.5 in /client ([#84](https://github.com/StrandedTurtle/dockpull/issues/84)) ([0911f9c](https://github.com/StrandedTurtle/dockpull/commit/0911f9c59ef62e70507502ebc43b0aa389a2f063))
+* **deps-dev:** bump fast-uri from 3.1.5 to 3.1.7 in /client ([#89](https://github.com/StrandedTurtle/dockpull/issues/89)) ([47fc66b](https://github.com/StrandedTurtle/dockpull/commit/47fc66bbb92cbe25bfb436499ff56db3c1e8a3dc))
+* **deps:** bump better-sqlite3 from 12.11.1 to 13.0.3 in /server ([dc380a9](https://github.com/StrandedTurtle/dockpull/commit/dc380a96e3d85c165c820b19668cf23a10707c6c))
+* **deps:** bump better-sqlite3 from 12.11.1 to 13.0.3 in /server ([f92fd30](https://github.com/StrandedTurtle/dockpull/commit/f92fd3047e4c6fc2c58cb54508c3953eb03ffbab))
+* **deps:** bump brace-expansion in /client ([7aae162](https://github.com/StrandedTurtle/dockpull/commit/7aae162bf0331b3cb0efbeec8fa8ac923aa12204))
+* **deps:** bump brace-expansion in /client ([11127fa](https://github.com/StrandedTurtle/dockpull/commit/11127faaa8aa1d151591f621f3897664bc32b59e))
+* **deps:** bump postcss from 8.5.19 to 8.5.25 in /client ([#85](https://github.com/StrandedTurtle/dockpull/issues/85)) ([d0896fc](https://github.com/StrandedTurtle/dockpull/commit/d0896fcf7cdc07d51c04c9f7950638b20a62d2d3))
+* **deps:** bump qs from 6.15.3 to 6.16.0 in /server ([#91](https://github.com/StrandedTurtle/dockpull/issues/91)) ([92508c2](https://github.com/StrandedTurtle/dockpull/commit/92508c21ff03befd4a5058ee900d820a47a5d76c))
+* **deps:** bump react-router and react-router-dom in /client ([7665692](https://github.com/StrandedTurtle/dockpull/commit/766569293fdff57871e7001d58b32812984e94cf))
+* **deps:** bump react-router and react-router-dom in /client ([03075a3](https://github.com/StrandedTurtle/dockpull/commit/03075a3110632386631cbc0160910bf497943ffb))
+
 ## [1.6.1](https://github.com/StrandedTurtle/dockpull/compare/v1.6.0...v1.6.1) (2026-07-19)
 
 
