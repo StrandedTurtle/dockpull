@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.3](https://github.com/StrandedTurtle/dockpull/compare/v1.6.2...v1.6.3) (2026-09-14)
+
+
+### Bug Fixes
+
+* **deps:** bump protobufjs from 7.6.4 to 7.6.6 in /server ([#93](https://github.com/StrandedTurtle/dockpull/issues/93)) ([2e5fd4a](https://github.com/StrandedTurtle/dockpull/commit/2e5fd4a5a18e4ec09fc749a510f9289d9fa0b741))
+* **deps:** bump the client-minor-patch group across 1 directory with 5 updates ([33573ff](https://github.com/StrandedTurtle/dockpull/commit/33573ffffeae537ef7ec15483ae16c934ec7ff45))
+
 ## [1.6.2](https://github.com/StrandedTurtle/dockpull/compare/v1.6.1...v1.6.2) (2026-09-14)
 
 
