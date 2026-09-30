@@ -241,6 +241,38 @@ apiRouter.delete('/api/pin/:ref', (req, res) => {
   return res.status(200).json({ ok: true });
 });
 
+// Skip the currently offered update for an image ("not this build") without
+// pinning it: the card and notifications stay quiet until a newer build
+// appears. `DELETE` undoes it.
+function setSkipped(rawRef, skipped, res) {
+  if (typeof rawRef !== 'string' || rawRef.trim() === '') {
+    return res.status(400).json({ error: 'invalid_payload' });
+  }
+  let normalized;
+  try {
+    normalized = normalizeRef(rawRef);
+  } catch {
+    return res.status(400).json({ error: 'invalid_payload' });
+  }
+  if (!db.setLatestEventSkipped(normalized, skipped)) {
+    return res.status(404).json({ error: 'no_pending_update' });
+  }
+  broadcastGlobal({ type: 'containers-changed' });
+  return res.status(200).json({ ok: true });
+}
+
+apiRouter.post('/api/skip', (req, res) => setSkipped(req.body?.ref, true, res));
+
+apiRouter.delete('/api/skip/:ref', (req, res) => {
+  let ref;
+  try {
+    ref = decodeURIComponent(req.params.ref);
+  } catch {
+    return res.status(400).json({ error: 'invalid_payload' });
+  }
+  return setSkipped(ref, false, res);
+});
+
 // --- Settings ---
 
 apiRouter.get('/api/settings', (req, res) => {

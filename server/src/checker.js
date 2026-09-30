@@ -9,7 +9,7 @@
 
 import { listContainers } from './docker.js';
 import { getRemoteDigest, getRemoteVersion } from './registry.js';
-import { digestsEqual } from './reconcile.js';
+import { digestsEqual, isRunningDigest } from './reconcile.js';
 import { isMeaningfulVersion } from './version.js';
 import {
   parseGitHubRepo,
@@ -72,6 +72,9 @@ async function detectBreakingForContainer(c) {
     const gh = parseGitHubRepo(c.sourceUrl);
     if (!gh) return 0;
     const releases = await getReleasesCached(gh.owner, gh.repo);
+    // Without a known running version we can't tell which notes are "newer",
+    // and scanning the latest few releases wholesale over-flags.
+    if (!isMeaningfulVersion(c.currentVersion)) return 0;
     const newer = selectNewerReleases(releases, c.currentVersion);
     return detectBreakingChanges(newer) ? 1 : 0;
   } catch {
@@ -79,22 +82,47 @@ async function detectBreakingForContainer(c) {
   }
 }
 
+// The in-flight check, if any. A manual "Check for updates" and the daily scan
+// (or two open dashboards auto-checking) can overlap; running two checks at
+// once would race on the "already flagged?" lookup and insert duplicate events,
+// so concurrent callers share the one run instead.
+let inFlight = null;
+
 /**
  * @returns {Promise<{ total: number, checked: number, updatesFound: number, errors: number }>}
  * @throws if the Docker daemon can't be reached (caller maps to 503).
  */
-export async function runCheck() {
+export function runCheck() {
+  if (!inFlight) {
+    inFlight = doCheck().finally(() => {
+      inFlight = null;
+    });
+  }
+  return inFlight;
+}
+
+async function doCheck() {
   const containers = await listContainers();
 
-  // De-dupe by normalized ref so we hit each image once even if several
-  // containers run it.
+  // Group by normalized ref so we hit each registry tag once even if several
+  // containers run it — but keep every container, since they may be running
+  // different images of that tag (one recreated, another not). Containers with
+  // no registry digest (built locally, loaded from a tarball) have nothing to
+  // compare against, so they're counted as checked without a registry call.
   const byRef = new Map();
+  const noDigestRefs = new Set();
   for (const c of containers) {
-    if (!byRef.has(c.normalizedRef)) byRef.set(c.normalizedRef, c);
+    if (!c.currentDigest) {
+      noDigestRefs.add(c.normalizedRef);
+      continue;
+    }
+    if (!byRef.has(c.normalizedRef)) byRef.set(c.normalizedRef, []);
+    byRef.get(c.normalizedRef).push(c);
   }
   const items = [...byRef.values()];
+  const unverifiable = [...noDigestRefs].filter((ref) => !byRef.has(ref)).length;
 
-  let checked = 0;
+  let checked = unverifiable;
   let updatesFound = 0;
   let errors = 0;
   const errored = []; // { ref, image, message } per failed container check
@@ -102,14 +130,16 @@ export async function runCheck() {
   let idx = 0;
   async function worker() {
     while (idx < items.length) {
-      const c = items[idx];
+      const group = items[idx];
       idx += 1;
+      let c = group[0];
       try {
         const remote = await getRemoteDigest(c.image);
         checked += 1;
         if (!remote) continue; // digest-pinned or registry gave no digest
 
-        if (c.currentDigest && digestsEqual(remote, c.currentDigest)) {
+        const stale = group.filter((x) => !isRunningDigest(remote, x.currentDigest, x.currentDigests));
+        if (stale.length === 0) {
           // Up to date — clear any stale unresolved event.
           db.resolveEventsForRef(c.normalizedRef);
           // The running image IS the latest. If its own version label is junk
@@ -125,6 +155,7 @@ export async function runCheck() {
           }
           continue;
         }
+        c = stale[0];
 
         // Differs from what's running: flag it, unless we already have an
         // unresolved event for this exact digest (avoid duplicate rows on
@@ -146,7 +177,13 @@ export async function runCheck() {
 
         // Best-effort: only paid for images that actually have an update.
         const availableVersion = await resolveAvailableVersion(c);
-        const breaking = await detectBreakingForContainer(c);
+        // Scan release notes from what's actually running: prefer the image's
+        // own label, else a version remembered for its digest, so a junk label
+        // (`main`) doesn't make every recent release count as "newer".
+        const runningVersion = isMeaningfulVersion(c.currentVersion)
+          ? c.currentVersion
+          : db.getImageVersion(c.currentDigest);
+        const breaking = await detectBreakingForContainer({ ...c, currentVersion: runningVersion });
 
         db.recordEvent({
           image: c.image,
@@ -175,14 +212,15 @@ export async function runCheck() {
     Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker())
   );
 
-  const summary = { at: Date.now(), total: items.length, checked, updatesFound, errors, errored };
+  const total = items.length + unverifiable;
+  const summary = { at: Date.now(), total, checked, updatesFound, errors, errored };
   try {
     db.setMeta('lastCheck', summary);
   } catch {
     // metadata persistence is best-effort; never fail a check over it.
   }
 
-  return { total: items.length, checked, updatesFound, errors };
+  return { total, checked, updatesFound, errors };
 }
 
 export default { runCheck };

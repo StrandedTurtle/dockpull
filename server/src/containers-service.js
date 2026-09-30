@@ -9,7 +9,7 @@
  * server/test/containers-service.test.js).
  */
 
-import { isUpdateAvailable, digestsEqual } from './reconcile.js';
+import { isUpdateAvailable, isRunningDigest } from './reconcile.js';
 import { isMeaningfulVersion } from './version.js';
 
 /**
@@ -48,11 +48,13 @@ export function buildContainerItems({
     let updateAvailable;
     let availableDigest;
     let availableVersion;
+    let skipped = false;
 
-    if (event && digestsEqual(c.currentDigest, event.digest)) {
-      // The running container's digest already matches the event's digest:
-      // the update has already been applied. Mark the event resolved and
-      // report no update available.
+    if (event && isRunningDigest(event.digest, c.currentDigest, c.currentDigests)) {
+      // The running image is already known under the event's digest: the
+      // update has been applied (or the "new" digest was just a re-pushed
+      // index for the same image). Mark the event resolved and report no
+      // update available.
       refsToResolve.push(c.normalizedRef);
       updateAvailable = false;
       availableDigest = null;
@@ -61,6 +63,12 @@ export function buildContainerItems({
       updateAvailable = isUpdateAvailable(c.currentDigest, event?.digest);
       availableDigest = updateAvailable ? event.digest : null;
       availableVersion = updateAvailable ? (event?.available_version ?? null) : null;
+      // The user dismissed this exact build: not "available", but remember
+      // what was skipped so the card can offer to undo it.
+      if (updateAvailable && event?.skipped) {
+        skipped = true;
+        updateAvailable = false;
+      }
     }
 
     // Prefer the image's own meaningful version label; otherwise fall back to a
@@ -68,7 +76,7 @@ export function buildContainerItems({
     const currentVersion = isMeaningfulVersion(c.currentVersion)
       ? c.currentVersion
       : lookupVersion(c.currentDigest) ?? c.currentVersion ?? null;
-    if (updateAvailable && !isMeaningfulVersion(availableVersion)) {
+    if ((updateAvailable || skipped) && !isMeaningfulVersion(availableVersion)) {
       availableVersion = lookupVersion(availableDigest) ?? availableVersion ?? null;
     }
 
@@ -89,6 +97,7 @@ export function buildContainerItems({
       // Only meaningful alongside an actual update — a stale event's flag
       // must not leak through once the digests match again.
       breakingRisk: !!(updateAvailable && event?.breaking),
+      skipped,
       pinned: isPinned(c.normalizedRef),
       canRevert: !!rollback,
       rollbackVersion: rollback?.old_version ?? null,

@@ -75,9 +75,13 @@ If the paths don't match you'll get `compose file not found` and broken bind mou
 - **Updates tab** — containers grouped by stack, update-available ones on top.
   Defaults to showing only what needs updating; flip to **All** to see everything.
   Tap **Update** to pull + recreate that service (watch live logs), or **Update all**
-  to run them one at a time. After an update DockPull verifies the container actually
+  to run them (one at a time within each stack). After an update DockPull verifies the container actually
   comes up healthy (catching crash-loops), and offers a one-click **Revert** to the
-  previous image if it doesn't. **Pin Version** holds a container at its current version.
+  previous image if it doesn't. **Pin Version** holds a container at its current version;
+  **Skip** dismisses just the update on offer, and the card returns when a newer
+  build is published. An update marked **(rebuilt)** has the same version number
+  but a new image — the publisher re-pushed the tag, usually for base-image or
+  security patches.
 - **History tab** — a log of past updates. **Clear history** wipes it (with a confirm).
 - **Settings tab** — theme, default view, auto-check on open, the **daily background
   scan** + **notifications** (Discord, ntfy, Gotify, or a generic webhook — with a
