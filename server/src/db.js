@@ -76,6 +76,11 @@ CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC
   if (!cols.includes('breaking')) {
     db.exec('ALTER TABLE update_events ADD COLUMN breaking INTEGER DEFAULT 0');
   }
+  // `skipped`: the user dismissed this specific available build ("Skip this
+  // update"). A newer build creates a fresh, unskipped event.
+  if (!cols.includes('skipped')) {
+    db.exec('ALTER TABLE update_events ADD COLUMN skipped INTEGER DEFAULT 0');
+  }
 }
 
 const stmts = {
@@ -91,6 +96,14 @@ const stmts = {
   resolveEventsForRef: db.prepare(`
     UPDATE update_events SET resolved = 1
     WHERE normalized_ref = ? AND resolved = 0
+  `),
+  setLatestEventSkipped: db.prepare(`
+    UPDATE update_events SET skipped = ?
+    WHERE id = (
+      SELECT id FROM update_events
+      WHERE normalized_ref = ? AND resolved = 0
+      ORDER BY id DESC LIMIT 1
+    )
   `),
   updateEventAvailableVersion: db.prepare(`
     UPDATE update_events SET available_version = ?
@@ -197,6 +210,14 @@ export function latestUnresolvedEventForRef(normalized_ref) {
 
 export function resolveEventsForRef(normalized_ref) {
   return stmts.resolveEventsForRef.run(normalized_ref);
+}
+
+/**
+ * Skip (or un-skip) the currently offered update for a ref — i.e. its latest
+ * unresolved event. Returns true if there was one to change.
+ */
+export function setLatestEventSkipped(normalized_ref, skipped) {
+  return stmts.setLatestEventSkipped.run(skipped ? 1 : 0, normalized_ref).changes > 0;
 }
 
 export function updateEventAvailableVersion(normalized_ref, digest, available_version) {

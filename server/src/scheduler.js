@@ -15,6 +15,7 @@ import { listContainers, listDanglingImages } from './docker.js';
 import { buildContainerItems } from './containers-service.js';
 import { normalizeRef } from './reconcile.js';
 import { sendUpdates } from './notify.js';
+import { broadcastGlobal } from './sse.js';
 import * as db from './db.js';
 
 let timer = null;
@@ -68,6 +69,8 @@ export function selectNotifyTargets(items, unnotifiedRefs, normalizeRefFn) {
  */
 export async function runScheduledCheck() {
   await runCheck();
+  // Let any open dashboards pick up what the scan found.
+  broadcastGlobal({ type: 'containers-changed' });
 
   // Best-effort: note whether there's anything to prune, so the client can
   // show a badge without hitting the Docker API on every page load. Never
@@ -96,6 +99,9 @@ export async function runScheduledCheck() {
     containers,
     lookupEvent: db.latestUnresolvedEventForRef,
     isPinned: (ref) => db.isPinned(ref),
+    // Same remembered versions the dashboard shows, so the message reads
+    // "1.2.3 → 1.2.4" rather than a junk label like "main".
+    lookupVersion: (digest) => db.getImageVersion(digest),
   });
 
   const { toNotify, hasNew } = selectNotifyTargets(items, unnotified, normalizeRef);

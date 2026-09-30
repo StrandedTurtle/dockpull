@@ -215,6 +215,22 @@ always returns normalized refs. Pinning ("Pin Version") holds a container at
 its current version: it's never flagged for updates and is grouped into a
 separate section, but can still be updated by hand.
 
+### `POST /api/skip`
+
+- Auth: cookie.
+- Body: `{ "ref": "string" }` (normalized like `/api/pin`).
+- Skips the currently offered update for that image ("not this build"): the
+  item reports `updateAvailable: false, skipped: true` and it's left out of
+  notifications, until a newer build is found (which is offered as usual).
+- Response: `200 { "ok": true }`; `404 { "error": "no_pending_update" }` if
+  there's no pending update for the ref.
+
+### `DELETE /api/skip/:ref`
+
+- Auth: cookie.
+- Un-skips the pending update for `ref` (URL-encoded). Same responses as
+  `POST /api/skip`.
+
 ### `GET /api/settings`
 
 - Auth: cookie.
@@ -313,6 +329,9 @@ Field notes:
   the running and available versions mention breaking changes (best-effort,
   GitHub-sourced images only; scanned when the update event is recorded).
   `false` otherwise, including when no update is available.
+- `skipped` — `true` when an update exists but the user skipped that exact
+  build (`POST /api/skip`); `updateAvailable` is then `false`, while
+  `availableDigest`/`availableVersion` still describe the skipped build.
 - `pinned` — `true` if the image ref is in the `pinned` table ("Pin Version":
   update indicator is suppressed and the container is grouped separately, but
   a manual update is still allowed).

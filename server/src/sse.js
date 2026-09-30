@@ -40,6 +40,13 @@ export function startSession(name) {
     return false;
   }
 
+  // A just-finished session for this name may still be in its grace period;
+  // cancel its cleanup timer, or it would fire mid-way through the NEW session
+  // (e.g. a Revert started right after a failed update) and delete it —
+  // silently dropping its logs and result.
+  const previous = sessions.get(name);
+  if (previous?.timer) clearTimeout(previous.timer);
+
   const session = {
     lines: [],
     result: null,
@@ -98,8 +105,10 @@ export function finish(name, result) {
   session.subscribers.clear();
 
   session.timer = setTimeout(() => {
-    sessions.delete(name);
+    // Only remove this session — never a newer one started under the same name.
+    if (sessions.get(name) === session) sessions.delete(name);
   }, FINISHED_SESSION_TTL_MS);
+  session.timer.unref?.();
 }
 
 /**

@@ -5,7 +5,11 @@ import {
   buildNtfyMessage,
   buildGotifyPayload,
   buildWebhookPayload,
+  buildNtfyUrl,
+  sendUpdates,
+  sendTest,
 } from '../src/notify.js';
+import http from 'node:http';
 
 test('buildDiscordPayload: header pluralizes and lists items', () => {
   const p = buildDiscordPayload([
@@ -50,4 +54,47 @@ test('buildWebhookPayload: structured containers array', () => {
   assert.equal(p.containers[0].name, 'jellyfin');
   assert.equal(p.containers[0].currentVersion, '10.9.0');
   assert.equal(p.containers[1].currentVersion, null);
+});
+
+test('versions: shows "current → available", and flags same-version rebuilds', () => {
+  const p = buildDiscordPayload([
+    { name: 'a', image: 'a:latest', currentVersion: '1.0.0', availableVersion: '1.1.0' },
+    { name: 'b', image: 'b:latest', currentVersion: '2.0.0', availableVersion: '2.0.0' },
+  ]);
+  assert.match(p.content, /1\.0\.0 → 1\.1\.0/);
+  assert.match(p.content, /2\.0\.0, rebuilt/);
+});
+
+test('buildNtfyUrl: carries title/tags as query params and keeps existing ones', () => {
+  const u = new URL(buildNtfyUrl('https://ntfy.example/topic?auth=abc', { title: '🔔 2 updates', tags: 'package' }));
+  assert.equal(u.searchParams.get('auth'), 'abc');
+  assert.equal(u.searchParams.get('title'), '🔔 2 updates');
+  assert.equal(u.searchParams.get('tags'), 'package');
+});
+
+// Regression: the emoji title used to go in a `Title` header, which fetch
+// rejects (headers must be Latin-1) — so every real ntfy notification threw.
+test('sendUpdates/sendTest (ntfy): emoji titles are delivered, not thrown', async () => {
+  const received = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      received.push({ url: req.url, body });
+      res.end('ok');
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}/updates`;
+  try {
+    const r1 = await sendUpdates('ntfy', url, items);
+    const r2 = await sendTest('ntfy', url);
+    assert.equal(r1.ok, true);
+    assert.equal(r2.ok, true);
+    const q = new URL(received[0].url, 'http://x').searchParams;
+    assert.match(q.get('title'), /🔔 2 container updates available/);
+    assert.match(received[0].body, /jellyfin/);
+  } finally {
+    server.close();
+  }
 });

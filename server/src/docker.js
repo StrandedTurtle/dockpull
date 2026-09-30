@@ -56,60 +56,61 @@ function stripLeadingSlash(rawName) {
 }
 
 /**
- * Pure: picks the digest from an image's `RepoDigests` that matches the
- * configured image ref's repo, to disambiguate when an image was pulled/
- * tagged under several refs. Falls back to the sole RepoDigest if there's
- * exactly one. Returns null when there's no usable match.
+ * Pure: every digest in an image's `RepoDigests` that belongs to the
+ * configured image ref's repo. An image can legitimately carry several digests
+ * for the same repo — e.g. it was pulled under two tags whose manifest lists
+ * differ only in annotations, or the publisher re-pushed the tag's index
+ * (adding attestations) without changing the image itself. Docker lists them
+ * in lexical order, not newest-first, so any one of them may be the digest the
+ * registry currently serves; callers must compare against all of them. Falls
+ * back to the sole RepoDigest if there's exactly one and no repo match.
  *
  * @param {string[]|undefined} repoDigests - image inspect `RepoDigests`.
  * @param {string} image - configured image ref, e.g. "nginx:latest".
- * @returns {string|null}
+ * @returns {string[]}
  */
-function pickRepoDigest(repoDigests, image) {
+export function pickRepoDigests(repoDigests, image) {
   if (!Array.isArray(repoDigests) || repoDigests.length === 0) {
-    return null;
+    return [];
   }
 
   // Determine the repo (registry/repo, no tag) we're looking for.
   let wantedRepo = null;
   try {
-    const normalized = normalizeRef(image);
-    wantedRepo = normalized.includes(':')
-      ? normalized.slice(0, normalized.lastIndexOf(':'))
-      : normalized;
+    const { registry, repository } = parseRef(image);
+    wantedRepo = `${registry}/${repository}`;
   } catch {
     wantedRepo = null;
   }
 
+  const matches = [];
   if (wantedRepo) {
     for (const entry of repoDigests) {
       const atIdx = entry.lastIndexOf('@');
       if (atIdx === -1) continue;
-      const repoPart = entry.slice(0, atIdx);
-      let normalizedRepoPart;
+      let entryRepo;
       try {
-        // Append a dummy tag so normalizeRef parses repoPart as a name,
-        // not as "repo:port"-style ambiguity; we only need the
-        // registry/repo portion back out.
-        const probe = normalizeRef(`${repoPart}:__probe__`);
-        normalizedRepoPart = probe.slice(0, probe.lastIndexOf(':'));
+        const { registry, repository } = parseRef(entry);
+        entryRepo = `${registry}/${repository}`;
       } catch {
-        normalizedRepoPart = repoPart;
+        entryRepo = entry.slice(0, atIdx);
       }
-      if (normalizedRepoPart === wantedRepo) {
-        return entry.slice(atIdx + 1);
+      const digest = entry.slice(atIdx + 1);
+      if (entryRepo === wantedRepo && !matches.includes(digest)) {
+        matches.push(digest);
       }
     }
   }
+  if (matches.length > 0) return matches;
 
   // No repo match found; fall back to the sole RepoDigest's digest part, but
   // only if there's exactly one (otherwise it's ambiguous which applies).
   if (repoDigests.length === 1) {
     const atIdx = repoDigests[0].lastIndexOf('@');
-    return atIdx === -1 ? null : repoDigests[0].slice(atIdx + 1);
+    return atIdx === -1 ? [] : [repoDigests[0].slice(atIdx + 1)];
   }
 
-  return null;
+  return [];
 }
 
 /**
@@ -120,7 +121,7 @@ function pickRepoDigest(repoDigests, image) {
  *
  * @param {string} imageIdOrName - `Image` field from container inspect.
  * @param {string} image - configured image ref, e.g. "nginx:latest".
- * @returns {Promise<{ digest: string|null, version: string|null }>}
+ * @returns {Promise<{ digest: string|null, digests: string[], version: string|null, source: string|null }>}
  */
 async function inspectImageMeta(imageIdOrName, image) {
   let imageInfo;
@@ -128,7 +129,7 @@ async function inspectImageMeta(imageIdOrName, image) {
     imageInfo = await docker.getImage(imageIdOrName).inspect();
   } catch (err) {
     console.warn(`docker.js: failed to inspect image ${imageIdOrName}: ${err.message}`);
-    return { digest: null, version: null };
+    return { digest: null, digests: [], version: null, source: null };
   }
 
   const labels = imageInfo?.Config?.Labels || {};
@@ -136,8 +137,8 @@ async function inspectImageMeta(imageIdOrName, image) {
   const source = normalizeSourceUrl(
     labels['org.opencontainers.image.source'] || labels['org.opencontainers.image.url'] || null
   );
-  const digest = pickRepoDigest(imageInfo?.RepoDigests, image);
-  return { digest, version, source };
+  const digests = pickRepoDigests(imageInfo?.RepoDigests, image);
+  return { digest: digests[0] ?? null, digests, version, source };
 }
 
 /**
@@ -311,6 +312,7 @@ export async function listContainers() {
 
       const {
         digest: currentDigest,
+        digests: currentDigests,
         version: currentVersion,
         source: sourceUrl,
       } = await inspectImageMeta(inspectData.Image, image);
@@ -351,6 +353,7 @@ export async function listContainers() {
         currentVersion,
         sourceUrl: sourceUrl || null,
         currentDigest,
+        currentDigests,
         project: project || null,
         service: service || null,
         composeFile: composeFile || null,
@@ -448,6 +451,181 @@ async function currentDigestForContainerName(name) {
   const image = inspectData.Config?.Image;
   if (!image) return null;
   return resolveCurrentDigest(inspectData.Image, image);
+}
+
+/**
+ * True when two JSON-ish values are structurally equal (arrays/objects/
+ * primitives, as Docker inspect returns them). null and undefined are equal.
+ */
+function sameValue(a, b) {
+  if (a == null && b == null) return true;
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/**
+ * Pure: container create options that recreate `inspectData`'s container from
+ * `targetImage`, keeping only what the user configured and letting the target
+ * image supply its own defaults.
+ *
+ * A container's inspected Config is the *merge* of the old image's defaults and
+ * the user's overrides. Copying it verbatim onto a new image would pin the old
+ * image's ENV (e.g. APP_VERSION, PATH), CMD/ENTRYPOINT, labels and volumes
+ * over the new image's — so anything identical to `baseImageConfig` (the image
+ * the container currently runs) is dropped and left to the target image.
+ * Also carries anonymous volumes over by name (their data would otherwise be
+ * orphaned) and keeps a user-set hostname.
+ *
+ * @param {object} inspectData - container inspect output.
+ * @param {object|null} baseImageConfig - `Config` of the image it runs now.
+ * @param {string} targetImage - image ref/ID to create from.
+ * @returns {object} options for `docker.createContainer` (without `name`).
+ */
+export function buildRecreateOptions(inspectData, baseImageConfig, targetImage) {
+  const cfg = inspectData.Config || {};
+  const base = baseImageConfig || {};
+  const unlessDefault = (key) => (sameValue(cfg[key], base[key]) ? undefined : cfg[key]);
+
+  const baseEnv = new Set(base.Env || []);
+  const env = (cfg.Env || []).filter((e) => !baseEnv.has(e));
+
+  const baseLabels = base.Labels || {};
+  const labels = {};
+  for (const [k, v] of Object.entries(cfg.Labels || {})) {
+    if (baseLabels[k] !== v) labels[k] = v;
+  }
+
+  const minusBase = (obj, baseObj) => {
+    const out = {};
+    for (const k of Object.keys(obj || {})) {
+      if (!baseObj || !(k in baseObj)) out[k] = obj[k];
+    }
+    return Object.keys(out).length ? out : undefined;
+  };
+
+  // Docker's default hostname is the short container ID; only a hostname the
+  // user set (`hostname:` / --hostname) should survive into the new container.
+  const defaultHostname = (inspectData.Id || '').slice(0, 12);
+  const hostname = cfg.Hostname && cfg.Hostname !== defaultHostname ? cfg.Hostname : undefined;
+
+  // Re-attach anonymous volumes (64-hex names) by name so their data follows
+  // the container. Skip destinations the user already mounts explicitly.
+  const hostConfig = { ...(inspectData.HostConfig || {}) };
+  const covered = new Set([
+    ...(hostConfig.Binds || []).map((b) => b.split(':')[1]).filter(Boolean),
+    ...(hostConfig.Mounts || []).map((m) => m.Target).filter(Boolean),
+  ]);
+  const anonBinds = (inspectData.Mounts || [])
+    .filter((m) => m.Type === 'volume' && /^[0-9a-f]{64}$/.test(m.Name || '') && !covered.has(m.Destination))
+    .map((m) => `${m.Name}:${m.Destination}${m.RW === false ? ':ro' : ''}`);
+  if (anonBinds.length) hostConfig.Binds = [...(hostConfig.Binds || []), ...anonBinds];
+
+  // Keep only the user-meaningful endpoint settings; runtime state (IPs,
+  // endpoint/network IDs, the old container's ID alias) must not be replayed.
+  const shortId = defaultHostname;
+  const endpoints = {};
+  for (const [net, ep] of Object.entries(inspectData.NetworkSettings?.Networks || {})) {
+    const aliases = (ep?.Aliases || []).filter((a) => a !== shortId);
+    endpoints[net] = {
+      ...(ep?.IPAMConfig ? { IPAMConfig: ep.IPAMConfig } : {}),
+      ...(ep?.Links ? { Links: ep.Links } : {}),
+      ...(aliases.length ? { Aliases: aliases } : {}),
+      ...(ep?.DriverOpts ? { DriverOpts: ep.DriverOpts } : {}),
+    };
+  }
+
+  const opts = {
+    Image: targetImage,
+    Hostname: hostname,
+    Domainname: cfg.Domainname || undefined,
+    Cmd: unlessDefault('Cmd'),
+    Entrypoint: unlessDefault('Entrypoint'),
+    Env: env,
+    Labels: labels,
+    ExposedPorts: minusBase(cfg.ExposedPorts, base.ExposedPorts),
+    Volumes: minusBase(cfg.Volumes, base.Volumes),
+    WorkingDir: unlessDefault('WorkingDir'),
+    User: unlessDefault('User'),
+    Healthcheck: unlessDefault('Healthcheck'),
+    StopSignal: unlessDefault('StopSignal'),
+    StopTimeout: cfg.StopTimeout,
+    Tty: cfg.Tty,
+    OpenStdin: cfg.OpenStdin,
+    HostConfig: hostConfig,
+    NetworkingConfig: { EndpointsConfig: endpoints },
+  };
+  for (const k of Object.keys(opts)) if (opts[k] === undefined) delete opts[k];
+  return opts;
+}
+
+async function imageConfigOf(imageId) {
+  try {
+    return (await docker.getImage(imageId).inspect())?.Config || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Replace a container with a new one built from `createOpts`, without ever
+ * leaving the user with nothing: the old container is stopped and renamed out
+ * of the way (not removed) until the new one has been created and started. On
+ * any failure the new container is discarded and the old one is renamed back
+ * and restarted. The old one is only removed once the new one is running.
+ *
+ * @param {{ start?: boolean }} [opts] - start the new container (defaults to
+ *   whether the old one was running).
+ * @returns {Promise<void>} throws (after rolling back) if the swap failed.
+ */
+async function replaceContainer(name, inspectData, createOpts, log, opts = {}) {
+  const old = docker.getContainer(inspectData.Id);
+  const wasRunning = inspectData.State?.Running === true;
+  const start = opts.start ?? wasRunning;
+  const backupName = `${name}-dockpull-old-${Date.now()}`;
+
+  if (wasRunning) {
+    try {
+      await old.stop();
+    } catch (err) {
+      if (err.statusCode !== 304) throw err; // 304: already stopped
+    }
+  }
+
+  // Rename the old container out of the way. An --rm (AutoRemove) container
+  // is already gone once stopped — then there's nothing to fall back to.
+  let backedUp = false;
+  try {
+    await old.rename({ name: backupName });
+    backedUp = true;
+  } catch (err) {
+    if (err.statusCode !== 404) throw err;
+  }
+
+  let created = null;
+  try {
+    created = await docker.createContainer({ name, ...createOpts });
+    if (start) await created.start();
+  } catch (err) {
+    if (backedUp) {
+      log?.(`Recreate failed (${err.message}); restoring the previous container…`);
+      try {
+        if (created) await created.remove({ force: true });
+        await old.rename({ name });
+        if (wasRunning) await old.start();
+        log?.('Previous container restored.');
+      } catch (restoreErr) {
+        log?.(`Could not restore the previous container (kept as "${backupName}"): ${restoreErr.message}`);
+      }
+    }
+    throw err;
+  }
+
+  if (backedUp) {
+    try {
+      await old.remove();
+    } catch (err) {
+      console.warn(`docker.js: couldn't remove old container ${backupName}: ${err.message}`);
+    }
+  }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -661,40 +839,11 @@ export async function updateContainer(name, onLine) {
     };
   }
 
+  const wasRunning = inspectData.State?.Running === true;
   try {
-    const container = docker.getContainer(name);
-
-    const wasRunning = inspectData.State?.Running === true;
-
-    if (wasRunning) {
-      await container.stop();
-    }
-    await container.remove();
-
-    const created = await docker.createContainer({
-      name,
-      Image: inspectData.Config.Image,
-      Cmd: inspectData.Config.Cmd,
-      Entrypoint: inspectData.Config.Entrypoint,
-      Env: inspectData.Config.Env,
-      Labels: inspectData.Config.Labels,
-      ExposedPorts: inspectData.Config.ExposedPorts,
-      Volumes: inspectData.Config.Volumes,
-      WorkingDir: inspectData.Config.WorkingDir,
-      User: inspectData.Config.User,
-      Tty: inspectData.Config.Tty,
-      OpenStdin: inspectData.Config.OpenStdin,
-      StopSignal: inspectData.Config.StopSignal,
-      StopTimeout: inspectData.Config.StopTimeout,
-      HostConfig: inspectData.HostConfig,
-      NetworkingConfig: {
-        EndpointsConfig: inspectData.NetworkSettings?.Networks,
-      },
-    });
-
-    if (wasRunning) {
-      await created.start();
-    }
+    const baseImageConfig = await imageConfigOf(inspectData.Image);
+    const createOpts = buildRecreateOptions(inspectData, baseImageConfig, image);
+    await replaceContainer(name, inspectData, createOpts, (l) => onLine?.(l, 'stdout'));
   } catch (err) {
     return {
       success: false,
@@ -741,33 +890,13 @@ export async function revertContainer(name, imageId, onLine) {
   }
 
   const oldDigest = await currentDigestForContainerName(name);
-  const wasRunning = inspectData.State?.Running === true;
 
   try {
     log(`Reverting "${name}" to the previous image…`);
-    const container = docker.getContainer(name);
-    if (wasRunning) await container.stop();
-    await container.remove();
-
-    const created = await docker.createContainer({
-      name,
-      Image: imageId,
-      Cmd: inspectData.Config.Cmd,
-      Entrypoint: inspectData.Config.Entrypoint,
-      Env: inspectData.Config.Env,
-      Labels: inspectData.Config.Labels,
-      ExposedPorts: inspectData.Config.ExposedPorts,
-      Volumes: inspectData.Config.Volumes,
-      WorkingDir: inspectData.Config.WorkingDir,
-      User: inspectData.Config.User,
-      Tty: inspectData.Config.Tty,
-      OpenStdin: inspectData.Config.OpenStdin,
-      StopSignal: inspectData.Config.StopSignal,
-      StopTimeout: inspectData.Config.StopTimeout,
-      HostConfig: inspectData.HostConfig,
-      NetworkingConfig: { EndpointsConfig: inspectData.NetworkSettings?.Networks },
-    });
-    await created.start();
+    const baseImageConfig = await imageConfigOf(inspectData.Image);
+    const createOpts = buildRecreateOptions(inspectData, baseImageConfig, imageId);
+    // Revert always starts the container, even if it was stopped.
+    await replaceContainer(name, inspectData, createOpts, log, { start: true });
     log('Container recreated from the previous image.');
   } catch (err) {
     return { success: false, message: `Failed to revert container: ${err.message}`, oldDigest, newDigest: null };

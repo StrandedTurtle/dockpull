@@ -157,6 +157,17 @@ export function unpin(ref) {
   return del(`/pin/${encodeURIComponent(ref)}`);
 }
 
+// --- Skipping a specific update ---
+
+// Dismiss the currently offered build for an image until a newer one appears.
+export function skipUpdate(ref) {
+  return post('/skip', { ref });
+}
+
+export function unskipUpdate(ref) {
+  return del(`/skip/${encodeURIComponent(ref)}`);
+}
+
 // --- Settings ---
 
 export function getSettings() {

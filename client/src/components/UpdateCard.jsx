@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { pin, unpin, getChangelog } from '../api.js';
+import { pin, unpin, skipUpdate, unskipUpdate, getChangelog } from '../api.js';
 import { useUpdateRunner } from '../hooks/useUpdateRunner.js';
 import StatusMessage from './StatusMessage.jsx';
 import StreamLog from './StreamLog.jsx';
@@ -35,6 +35,14 @@ function displayVersion({ currentVersion, tag, currentDigest }) {
   if (isMeaningfulVersion(currentVersion)) return currentVersion;
   if (isMeaningfulVersion(tag)) return tag;
   return shortDigest(currentDigest);
+}
+
+// Same release, different build? Compare versions ignoring a leading "v"
+// ("v1.2.3" and "1.2.3" are the same release).
+function sameVersion(a, b) {
+  if (!isMeaningfulVersion(a) || !isMeaningfulVersion(b)) return false;
+  const norm = (v) => v.trim().replace(/^v/i, '').toLowerCase();
+  return norm(a) === norm(b);
 }
 
 // Build a "Changelog"/"Source" link from the image's OCI source label. GitHub
@@ -139,7 +147,7 @@ function ChangelogContent({ data }) {
  *  - registerRunner(name, runFn) — handle for "Update all"
  */
 export default function UpdateCard({ container, onSettled, onPinChange, registerRunner }) {
-  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, breakingRisk, pinned, sourceUrl, canRevert, rollbackVersion, checkError, state } =
+  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, breakingRisk, skipped, pinned, sourceUrl, canRevert, rollbackVersion, checkError, state } =
     container;
 
   const [pinBusy, setPinBusy] = useState(false);
@@ -188,6 +196,25 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
     }
   }, [pinned, image, onPinChange]);
 
+  // Skip just the offered build (or undo that). Reuses the pin busy flag and
+  // refresh callback — both are "change what this card offers" actions.
+  const toggleSkip = useCallback(async () => {
+    setPinBusy(true);
+    setActionError('');
+    try {
+      if (skipped) {
+        await unskipUpdate(image);
+      } else {
+        await skipUpdate(image);
+      }
+      if (onPinChange) onPinChange();
+    } catch (err) {
+      setActionError(err.message || 'Failed to skip update');
+    } finally {
+      setPinBusy(false);
+    }
+  }, [skipped, image, onPinChange]);
+
   const toggleChangelog = useCallback(async () => {
     const next = !clOpen;
     setClOpen(next);
@@ -207,6 +234,11 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
 
   const showUpdateAvailable = updateAvailable && !pinned;
   const link = sourceLink(sourceUrl);
+  const runningLabel = displayVersion(container);
+  // The tag was re-published with a new image but the same version number —
+  // typically a base-image/security refresh. Say so, rather than showing a
+  // confusing "1.2.3 → 1.2.3".
+  const isRebuild = showUpdateAvailable && sameVersion(runningLabel, availableVersion);
 
   return (
     <div className={`update-card${showUpdateAvailable ? ' has-update' : ''}`}>
@@ -225,6 +257,11 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
               </span>
             )}
             {pinned && <span className="pill pill-pinned">Version pinned</span>}
+            {skipped && !pinned && (
+              <span className="pill" title={availableDigest || ''}>
+                Skipped {isMeaningfulVersion(availableVersion) ? availableVersion : 'update'}
+              </span>
+            )}
             {state && state !== 'running' && (
               <span className="pill pill-state" title={`Container is ${state} — updating it will start it`}>
                 {state}
@@ -249,14 +286,18 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
         <div className="version-row">
           <span className="version-label">Running</span>
           <span className="version-value" title={currentDigest || ''}>
-            {displayVersion(container)}
+            {runningLabel}
           </span>
         </div>
         {showUpdateAvailable && (
           <div className="version-row">
             <span className="version-label">Available</span>
             <span className="version-value is-available" title={availableDigest || ''}>
-              {isMeaningfulVersion(availableVersion) ? availableVersion : 'newer image'}
+              {isRebuild
+                ? `${availableVersion} (rebuilt)`
+                : isMeaningfulVersion(availableVersion)
+                  ? availableVersion
+                  : 'newer image'}
             </span>
             {breakingRisk && (
               <span className="breaking-flag" title="Release notes mention possible breaking changes">⚠️</span>
@@ -264,6 +305,13 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
           </div>
         )}
       </div>
+
+      {isRebuild && (
+        <p className="card-hint">
+          Same version, new build ({shortDigest(currentDigest)} → {shortDigest(availableDigest)}). The
+          publisher re-pushed this tag — usually base-image or security patches.
+        </p>
+      )}
 
       {checkError && (
         <p className="card-check-error" title={checkError}>
@@ -285,6 +333,21 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
           {link && (
             <button type="button" className="btn-ghost" onClick={toggleChangelog} aria-expanded={clOpen}>
               {clOpen ? 'Hide changes' : showUpdateAvailable ? "What's changed" : 'Release notes'}
+            </button>
+          )}
+          {(showUpdateAvailable || (skipped && !pinned)) && (
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={toggleSkip}
+              disabled={pinBusy || busy}
+              title={
+                skipped
+                  ? 'Offer this update again'
+                  : 'Hide this update until a newer one is released (unlike pinning, newer updates still show)'
+              }
+            >
+              {skipped ? 'Unskip' : 'Skip'}
             </button>
           )}
           {canRevert && (
