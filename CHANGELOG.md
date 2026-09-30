@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/StrandedTurtle/dockpull/compare/v1.6.3...v1.7.0) (2026-09-30)
+
+
+### Features
+
+* "Skip" an offered update until a newer build is published ([ba0ccc0](https://github.com/StrandedTurtle/dockpull/commit/ba0ccc032a857ef591ff672b28a5f74c31a4b794))
+
+
+### Bug Fixes
+
+* stop false "update available" for same-version images, plus review fixes and Skip ([#99](https://github.com/StrandedTurtle/dockpull/issues/99)) ([ba0ccc0](https://github.com/StrandedTurtle/dockpull/commit/ba0ccc032a857ef591ff672b28a5f74c31a4b794))
+
 ## [1.6.3](https://github.com/StrandedTurtle/dockpull/compare/v1.6.2...v1.6.3) (2026-09-14)
 
 
