@@ -39,4 +39,36 @@ export function securityHeaders({ https = false } = {}) {
   };
 }
 
-export default { securityHeaders, CONTENT_SECURITY_POLICY };
+// Docker container names (and IDs) — anything else is rejected before it
+// reaches dockerode, which splices names into request paths unescaped (so a
+// "name" like "../../images/x" would address a different API endpoint).
+const CONTAINER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,254}$/;
+
+export function isValidContainerName(name) {
+  return typeof name === 'string' && CONTAINER_NAME_RE.test(name);
+}
+
+/** Express `router.param('name', …)` handler enforcing isValidContainerName. */
+export function validateContainerNameParam(req, res, next, name) {
+  if (isValidContainerName(name)) return next();
+  return res.status(400).json({ error: 'invalid_container_name' });
+}
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * CSRF guard for the API. The session cookie is SameSite=Lax, but "same site"
+ * includes every port on the same host — and homelabs often run many apps on
+ * one IP, any of which (or an XSS in one) could otherwise make the browser
+ * POST to DockPull with the user's cookie. State-changing /api requests must
+ * carry `X-DockPull: 1`: a cross-origin page can't set a custom header without
+ * a CORS preflight, which this server never approves. The app's own client
+ * always sends it.
+ */
+export function requireCsrfHeader(req, res, next) {
+  if (SAFE_METHODS.has(req.method) || !req.path.startsWith('/api/')) return next();
+  if (req.get('x-dockpull') === '1') return next();
+  return res.status(403).json({ error: 'csrf_header_missing' });
+}
+
+export default { securityHeaders, requireCsrfHeader, isValidContainerName, validateContainerNameParam, CONTENT_SECURITY_POLICY };

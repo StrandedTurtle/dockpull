@@ -132,3 +132,22 @@ test('buildRecreateOptions: without the base image config, everything is kept', 
   assert.deepEqual(o.Env, inspect.Config.Env);
   assert.deepEqual(o.Cmd, ['serve']);
 });
+
+import { trackedImageRef, REF_LABEL, DIGEST_LABEL } from '../src/docker.js';
+
+test('trackedImageRef: a reverted container (bare image ID) tracks its remembered ref', () => {
+  const id = `sha256:${'a'.repeat(64)}`;
+  assert.equal(trackedImageRef({ Config: { Image: id, Labels: { [REF_LABEL]: 'app:latest' } } }), 'app:latest');
+  assert.equal(trackedImageRef({ Config: { Image: 'app:1.2', Labels: { [REF_LABEL]: 'app:latest' } } }), 'app:1.2');
+  assert.equal(trackedImageRef({ Config: { Image: 'app:latest' } }), 'app:latest');
+  assert.equal(trackedImageRef({ Config: { Image: id } }), id);
+});
+
+test('buildRecreateOptions: revert labels never carry over to the next container', () => {
+  const o = buildRecreateOptions(
+    { ...inspect, Config: { ...inspect.Config, Labels: { ...inspect.Config.Labels, [REF_LABEL]: 'app:latest', [DIGEST_LABEL]: 'sha256:1' } } },
+    baseImage,
+    'app:latest'
+  );
+  assert.deepEqual(o.Labels, { 'my.label': 'x' });
+});

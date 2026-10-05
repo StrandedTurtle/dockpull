@@ -86,6 +86,25 @@ function isValidPassword(provided) {
 }
 
 /**
+ * Short fingerprint of the current admin password, keyed by SESSION_SECRET.
+ * Embedded in the session cookie so changing ADMIN_PASSWORD signs out every
+ * existing session (including a stolen cookie) instead of leaving them valid
+ * until they expire. Reveals nothing about the password itself.
+ */
+function passwordFingerprint() {
+  return crypto
+    .createHmac('sha256', config.SESSION_SECRET || '')
+    .update(`dockpull-session:${config.ADMIN_PASSWORD || ''}`)
+    .digest('hex')
+    .slice(0, 16);
+}
+
+/** Session cookie value: `<expiry ms>.<password fingerprint>`. */
+export function sessionCookieValue(expiry) {
+  return `${expiry}.${passwordFingerprint()}`;
+}
+
+/**
  * Reads `req.signedCookies.dockpull_session` and checks whether it represents a
  * non-expired session. cookie-parser has already verified the HMAC
  * signature by the time a value shows up in `signedCookies` (a
@@ -97,10 +116,14 @@ function isValidPassword(provided) {
  */
 export function isValidSession(req) {
   const value = req.signedCookies?.[SESSION_COOKIE];
-  if (!value) return false;
-  const expiry = Number(value);
-  if (!Number.isFinite(expiry)) return false;
-  return expiry > Date.now();
+  if (typeof value !== 'string' || !value) return false;
+  const dot = value.indexOf('.');
+  if (dot === -1) return false; // pre-fingerprint cookie: log in again
+  const expiry = Number(value.slice(0, dot));
+  if (!Number.isFinite(expiry) || expiry <= Date.now()) return false;
+  const given = Buffer.from(value.slice(dot + 1));
+  const expected = Buffer.from(passwordFingerprint());
+  return given.length === expected.length && crypto.timingSafeEqual(given, expected);
 }
 
 /**
@@ -122,8 +145,8 @@ export function loginHandler(req, res) {
   }
 
   clearLoginFailures(ip);
-  const expiry = String(Date.now() + config.SESSION_TTL * 1000);
-  res.cookie(SESSION_COOKIE, expiry, {
+  const expiry = Date.now() + config.SESSION_TTL * 1000;
+  res.cookie(SESSION_COOKIE, sessionCookieValue(expiry), {
     signed: true,
     httpOnly: true,
     sameSite: 'lax',
