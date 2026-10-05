@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/StrandedTurtle/dockpull/compare/v1.7.3...v1.8.0) (2026-10-05)
+
+
+### Features
+
+* newer version tags, DockPull update banner, flexible scheduling, failure alerts, backups ([#107](https://github.com/StrandedTurtle/dockpull/issues/107)) ([ab3e7d0](https://github.com/StrandedTurtle/dockpull/commit/ab3e7d07dbe93088bd198e849668c4e63b1eed3b))
+
 ## [1.7.3](https://github.com/StrandedTurtle/dockpull/compare/v1.7.2...v1.7.3) (2026-10-05)
 
 
