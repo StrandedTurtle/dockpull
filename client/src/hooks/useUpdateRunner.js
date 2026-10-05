@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { startUpdate, revertUpdate } from '../api.js';
+import { startUpdate, revertUpdate, switchTag } from '../api.js';
 import { useSSE } from './useSSE.js';
 
 /**
@@ -82,6 +82,10 @@ export function useUpdateRunner(name, onSettled) {
 
   const run = useCallback(() => start(startUpdate, 'Update started…'), [start]);
   const revert = useCallback(() => start(revertUpdate, 'Reverting…'), [start]);
+  const switchTo = useCallback(
+    (tag) => start((n) => switchTag(n, tag), `Switching to ${tag}…`),
+    [start]
+  );
 
   useEffect(() => {
     if (!result) return;
@@ -105,5 +109,5 @@ export function useUpdateRunner(name, onSettled) {
 
   const busy = starting || streamActive;
 
-  return { run, revert, busy, starting, startError, status, lines };
+  return { run, revert, switchTo, busy, starting, startError, status, lines };
 }

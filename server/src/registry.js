@@ -235,4 +235,54 @@ export async function getRemoteVersion(imageRef, { timeoutMs = 10000 } = {}) {
   }
 }
 
-export default { registryBaseUrl, getRemoteDigest, getRemoteVersion, parseWwwAuthenticate, pickPlatformManifest };
+/**
+ * Pure: the next-page URL from a registry `Link: <...>; rel="next"` header,
+ * resolved against `base`, or null.
+ */
+export function nextPageUrl(linkHeader, base) {
+  if (!linkHeader) return null;
+  const m = /<([^>]+)>\s*;\s*rel="?next"?/i.exec(linkHeader);
+  if (!m) return null;
+  try {
+    const next = new URL(m[1], base);
+    // Never follow pagination to a different host (or downgrade the scheme).
+    return next.origin === new URL(base).origin ? next.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Every tag of an image's repository (`GET /v2/<repo>/tags/list`), following
+ * pagination up to `maxPages` × 1000 tags. Same auth flow as digest checks.
+ *
+ * @param {string} imageRef
+ * @returns {Promise<string[]>}
+ * @throws if the registry is unreachable or refuses.
+ */
+export async function listTags(imageRef, { timeoutMs = 15000, maxPages = 10 } = {}) {
+  const { registry, repository } = parseRef(imageRef);
+  const base = registryBaseUrl(registry);
+  let url = `${base}/v2/${repository}/tags/list?n=1000`;
+  let authHeader = null;
+  const tags = [];
+  for (let page = 0; url && page < maxPages; page += 1) {
+    const get = () =>
+      fetch(url, {
+        headers: { Accept: 'application/json', ...(authHeader ? { Authorization: authHeader } : {}) },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    let res = await get();
+    if (res.status === 401) {
+      authHeader = await resolveAuthHeader(res, registry, repository, timeoutMs);
+      if (authHeader) res = await get();
+    }
+    if (!res.ok) throw new Error(`registry returned ${res.status} listing tags for ${imageRef}`);
+    const body = await res.json().catch(() => null);
+    if (Array.isArray(body?.tags)) tags.push(...body.tags);
+    url = nextPageUrl(res.headers.get('link'), base);
+  }
+  return tags;
+}
+
+export default { registryBaseUrl, listTags, nextPageUrl, getRemoteDigest, getRemoteVersion, parseWwwAuthenticate, pickPlatformManifest };

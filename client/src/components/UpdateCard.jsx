@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { pin, unpin, skipUpdate, unskipUpdate, getChangelog } from '../api.js';
+import { pin, unpin, skipUpdate, unskipUpdate, skipTag, getChangelog } from '../api.js';
 import { useUpdateRunner } from '../hooks/useUpdateRunner.js';
 import StatusMessage from './StatusMessage.jsx';
 import StreamLog from './StreamLog.jsx';
@@ -147,7 +147,7 @@ function ChangelogContent({ data }) {
  *  - registerRunner(name, runFn) — handle for "Update all"
  */
 export default function UpdateCard({ container, onSettled, onPinChange, registerRunner }) {
-  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, breakingRisk, skipped, pinned, sourceUrl, canRevert, rollbackVersion, checkError, state } =
+  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, breakingRisk, skipped, newerTag, newerMajorTag, pinned, sourceUrl, canRevert, rollbackVersion, checkError, state, composeFile } =
     container;
 
   const [pinBusy, setPinBusy] = useState(false);
@@ -159,7 +159,8 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
   const [clData, setClData] = useState(null);
   const [clError, setClError] = useState('');
 
-  const { run, revert, busy, startError, status, lines } = useUpdateRunner(name, onSettled);
+  const { run, revert, switchTo, busy, startError, status, lines } = useUpdateRunner(name, onSettled);
+  const [confirmTag, setConfirmTag] = useState(null);
 
   useEffect(() => {
     if (registerRunner) registerRunner(name, run);
@@ -214,6 +215,22 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
       setPinBusy(false);
     }
   }, [skipped, image, onPinChange]);
+
+  const dismissTag = useCallback(
+    async (tag) => {
+      setPinBusy(true);
+      setActionError('');
+      try {
+        await skipTag(image, tag);
+        if (onPinChange) onPinChange();
+      } catch (err) {
+        setActionError(err.message || 'Failed to skip version');
+      } finally {
+        setPinBusy(false);
+      }
+    },
+    [image, onPinChange]
+  );
 
   const toggleChangelog = useCallback(async () => {
     const next = !clOpen;
@@ -313,6 +330,32 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
         </p>
       )}
 
+      {!pinned && (newerTag || newerMajorTag) && (
+        <div className="newer-tags">
+          {[newerTag, newerMajorTag].filter(Boolean).map((tag) => (
+            <div className="newer-tag-row" key={tag}>
+              <span className="newer-tag-label">
+                {tag === newerMajorTag ? 'New major version' : 'Newer version'}{' '}
+                <strong className="version-value">{tag}</strong>
+              </span>
+              <span className="newer-tag-actions">
+                <button type="button" className="btn-ghost" onClick={() => dismissTag(tag)} disabled={busy || pinBusy}>
+                  Skip
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => setConfirmTag(tag)}
+                  disabled={busy}
+                >
+                  Switch
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {checkError && (
         <p className="card-check-error" title={checkError}>
           ⚠ Couldn't check for updates (e.g. private registry or rate limit).
@@ -382,6 +425,28 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
           confirmLabel="Revert"
           onConfirm={handleRevert}
           onCancel={() => setConfirmRevert(false)}
+        />
+      )}
+
+      {confirmTag && (
+        <ConfirmDialog
+          title={`Switch to ${confirmTag}?`}
+          message={
+            (composeFile
+              ? `This changes the image tag for "${service || name}" in ${composeFile} to ${confirmTag} (a .dockpull.bak copy is kept), then pulls and recreates it.`
+              : `This pulls ${confirmTag} and recreates "${name}" on it.`) +
+            (confirmTag === newerMajorTag
+              ? ' This is a new major version — check its release notes for breaking changes first.'
+              : '') +
+            ' You can revert afterwards.'
+          }
+          confirmLabel={`Switch to ${confirmTag}`}
+          onConfirm={() => {
+            const tag = confirmTag;
+            setConfirmTag(null);
+            if (!busy) switchTo(tag);
+          }}
+          onCancel={() => setConfirmTag(null)}
         />
       )}
 

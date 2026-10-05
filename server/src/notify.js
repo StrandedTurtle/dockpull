@@ -152,6 +152,47 @@ export function sendUpdates(type, url, items, opts) {
   }
 }
 
+/**
+ * Pure: a "something went wrong" notification for a failed update, revert or
+ * tag switch (including "updated, but it came up unhealthy").
+ *
+ * @param {{ name: string, image?: string|null, action?: string, message?: string }} f
+ * @returns {{ title: string, body: string }}
+ */
+export function buildFailureMessage({ name, image, action = 'update', message }) {
+  const detail = String(message || 'Unknown error')
+    .split('\n')
+    .slice(0, 6)
+    .join('\n')
+    .slice(0, 800);
+  return {
+    title: `⚠️ ${action === 'revert' ? 'Revert' : 'Update'} of ${name} failed`,
+    body: `${image ? `${image}\n` : ''}${detail}`,
+  };
+}
+
+/** Send a failure notification to the configured target. */
+export function sendFailure(type, url, failure, opts) {
+  const { title: t, body } = buildFailureMessage(failure);
+  switch (type) {
+    case 'ntfy':
+      return postNtfy(url, { title: t, tags: 'warning', body }, opts);
+    case 'gotify':
+      return postJson(url, { title: t, message: body, priority: 8 }, opts);
+    case 'webhook':
+      return postJson(
+        url,
+        { title: t, message: body, event: 'update_failed', container: failure.name, image: failure.image ?? null },
+        opts
+      );
+    case 'discord':
+    default: {
+      const fence = '```';
+      return postJson(url, { content: `**${t}**\n${fence}\n${body.replaceAll(fence, '``')}\n${fence}` }, opts);
+    }
+  }
+}
+
 /** Send a one-off test message so the user can confirm their target works. */
 export function sendTest(type, url, opts) {
   const text = '✅ DockPull test — your notifications are configured correctly.';
@@ -179,4 +220,6 @@ export default {
   buildWebhookPayload,
   sendUpdates,
   sendTest,
+  sendFailure,
+  buildFailureMessage,
 };

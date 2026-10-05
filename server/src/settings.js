@@ -27,6 +27,11 @@ function isValidTime(v) {
   return typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v.trim());
 }
 
+function intInRange(v, min, max) {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v) : NaN;
+  return Number.isInteger(n) && n >= min && n <= max ? n : undefined;
+}
+
 function timeOrUndef(v) {
   return isValidTime(v) ? v.trim() : undefined;
 }
@@ -72,6 +77,25 @@ const SPEC = {
     fromStore: (v) => (isValidTime(v) ? v.trim() : ENV_TIME),
     fromInput: timeOrUndef,
   },
+  // Background scan cadence: 'daily' at scheduledCheckTime, or 'interval'
+  // every scheduleIntervalHours hours.
+  scheduleMode: {
+    default: 'daily',
+    fromStore: enumOf(['daily', 'interval'], 'daily'),
+    fromInput: enumOf(['daily', 'interval'], undefined),
+  },
+  scheduleIntervalHours: {
+    default: 6,
+    fromStore: (v) => intInRange(v, 1, 168) ?? 6,
+    fromInput: (v) => intInRange(v, 1, 168),
+  },
+  // Also notify when an update fails or comes up unhealthy (uses the same
+  // notification target; only when notifications are enabled).
+  notifyOnFailure: {
+    default: true,
+    fromStore: (v) => bool(v, true),
+    fromInput: (v) => (typeof v === 'boolean' ? v : undefined),
+  },
   // Master "send notifications" toggle (kept this key for back-compat).
   discordEnabled: {
     default: ENV_WEBHOOK !== '',
@@ -84,6 +108,14 @@ const SPEC = {
     default: ENV_WEBHOOK,
     fromStore: (v) => (typeof v === 'string' ? v : ENV_WEBHOOK),
     fromInput: urlOrUndef,
+  },
+  // Newer version TAG detection (e.g. running postgres:16.3 when 16.4 exists):
+  // 'off', 'minor' (same major version — default) or 'major' (also offer the
+  // next major version).
+  tagUpdates: {
+    default: 'minor',
+    fromStore: enumOf(['off', 'minor', 'major'], 'minor'),
+    fromInput: enumOf(['off', 'minor', 'major'], undefined),
   },
   notifyType: {
     default: ENV_NOTIFY_TYPE,
@@ -126,6 +158,9 @@ export function updateSettings(patch) {
     err.code = 'invalid_value';
     throw err;
   }
+  // Validate everything first, then write: a bad value anywhere leaves the
+  // stored settings untouched (restore relies on this being all-or-nothing).
+  const toWrite = [];
   for (const [key, raw] of Object.entries(patch)) {
     const spec = SPEC[key];
     if (!spec) continue; // ignore unknown keys
@@ -135,8 +170,9 @@ export function updateSettings(patch) {
       err.code = 'invalid_value';
       throw err;
     }
-    db.setSetting(key, typeof coerced === 'boolean' ? (coerced ? '1' : '0') : String(coerced));
+    toWrite.push([key, typeof coerced === 'boolean' ? (coerced ? '1' : '0') : String(coerced)]);
   }
+  for (const [key, value] of toWrite) db.setSetting(key, value);
   return getSettings();
 }
 

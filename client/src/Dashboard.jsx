@@ -19,7 +19,14 @@ function timeAgo(ts) {
   return `${Math.round(h / 24)}d ago`;
 }
 
+// Anything actionable: a newer build of the same tag, or a newer version tag.
 function hasUpdate(c) {
+  return (c.updateAvailable || Boolean(c.newerTag || c.newerMajorTag)) && !c.pinned;
+}
+
+// What "Update all" applies: same-tag updates only. Switching to a newer tag
+// (especially a new major) is a deliberate, per-container choice.
+function hasDigestUpdate(c) {
   return c.updateAvailable && !c.pinned;
 }
 
@@ -211,13 +218,14 @@ export default function Dashboard({ onPendingCountChange }) {
   const mainItems = useMemo(() => visible.filter((c) => !c.pinned), [visible]);
 
   const pendingTargets = useMemo(
-    () => mainItems.filter(hasUpdate).map((c) => ({ name: c.name, project: c.project })),
+    () => mainItems.filter(hasDigestUpdate).map((c) => ({ name: c.name, project: c.project })),
     [mainItems]
   );
+  const pendingCount = useMemo(() => mainItems.filter(hasUpdate).length, [mainItems]);
 
   useEffect(() => {
-    if (onPendingCountChange) onPendingCountChange(pendingTargets.length);
-  }, [pendingTargets, onPendingCountChange]);
+    if (onPendingCountChange) onPendingCountChange(pendingCount);
+  }, [pendingCount, onPendingCountChange]);
 
   // Apply the filter chip + search needle, then group by stack (compose
   // project); groups with updates come first.
@@ -268,8 +276,8 @@ export default function Dashboard({ onPendingCountChange }) {
       <div className="dashboard-header">
         <div className="title-row">
           <h2>Containers</h2>
-          {pendingTargets.length > 0 ? (
-            <span className="badge">{pendingTargets.length}</span>
+          {pendingCount > 0 ? (
+            <span className="badge">{pendingCount}</span>
           ) : (
             !loading && <span className="badge badge-muted">0</span>
           )}

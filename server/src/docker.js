@@ -17,6 +17,8 @@ import { spawn } from 'node:child_process';
 import Docker from 'dockerode';
 import { config } from './config.js';
 import { normalizeRef, parseRef } from './reconcile.js';
+import { rewriteServiceImageTag, restoreServiceImage, ComposeEditError } from './compose-file.js';
+import { knownSourceFor } from './known-sources.js';
 
 // Best-effort identity of this app's own container, so listContainers can
 // exclude it (you can't safely update the updater from within itself). By
@@ -413,7 +415,7 @@ export async function listContainers() {
         image,
         tag,
         currentVersion,
-        sourceUrl: sourceUrl || null,
+        sourceUrl: sourceUrl || knownSourceFor(image),
         currentDigest,
         currentDigests,
         project: project || null,
@@ -702,18 +704,55 @@ async function imageIdForContainerName(name) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const NS_PER_MS = 1e6;
+
+/**
+ * Pure: how long to watch a container after (re)creating it, from its own
+ * healthcheck settings. With a healthcheck, Docker only marks it unhealthy
+ * after `start_period` plus `retries` failed probes (each up to `interval` +
+ * `timeout` apart), so a fixed 30s wrongly failed slow starters (databases,
+ * anything with a long start_period). Without one, there's nothing to wait
+ * for — instead the container must stay up for `stableMs` so an app that
+ * crashes a few seconds after starting isn't reported as a good update.
+ * Docker defaults: interval 30s, timeout 30s, retries 3, start_period 0.
+ *
+ * @param {object|null|undefined} healthcheck - container `Config.Healthcheck`.
+ * @returns {{ hasHealthcheck: boolean, timeoutMs: number, stableMs: number }}
+ */
+export function healthWaitPlan(healthcheck) {
+  const test = healthcheck?.Test;
+  const disabled = !Array.isArray(test) || test.length === 0 || test[0] === 'NONE';
+  if (disabled) return { hasHealthcheck: false, timeoutMs: 30_000, stableMs: 8_000 };
+  const ms = (ns, dflt) => (Number.isFinite(ns) && ns > 0 ? ns / NS_PER_MS : dflt);
+  const interval = ms(healthcheck.Interval, 30_000);
+  const probeTimeout = ms(healthcheck.Timeout, 30_000);
+  const startPeriod = ms(healthcheck.StartPeriod, 0);
+  const retries = Number.isFinite(healthcheck.Retries) && healthcheck.Retries > 0 ? healthcheck.Retries : 3;
+  const worstCase = startPeriod + (interval + probeTimeout) * (retries + 1) + 10_000;
+  return {
+    hasHealthcheck: true,
+    timeoutMs: Math.min(Math.max(worstCase, 30_000), 15 * 60_000), // 30s – 15min
+    stableMs: 0,
+  };
+}
+
 /**
  * Poll a container after an update to confirm it actually comes up, so we don't
- * report a green "updated" for an image that immediately crash-loops. Returns
- * as soon as the state is decisive; gives up (unhealthy) after `timeoutMs`.
+ * report a green "updated" for an image that immediately crash-loops. Waits as
+ * long as the container's own healthcheck needs (see healthWaitPlan); returns
+ * as soon as the state is decisive, or gives up (unhealthy) at the deadline.
  *
  * @param {string} name
+ * @param {(line: string) => void} [log] - progress notes for the live log.
  * @returns {Promise<{ healthy: boolean, state: string, health: string|null, timedOut?: boolean }>}
  */
-export async function verifyContainerHealth(name, { timeoutMs = 30000, intervalMs = 2000 } = {}) {
-  const deadline = Date.now() + timeoutMs;
+export async function verifyContainerHealth(name, { intervalMs = 2000, log, plan: planOverride } = {}) {
+  let plan = planOverride;
   let state = 'unknown';
   let health = null;
+  let runningSince = null;
+  let restartCount = null;
+  let deadline = null;
   for (;;) {
     let data;
     try {
@@ -721,14 +760,34 @@ export async function verifyContainerHealth(name, { timeoutMs = 30000, intervalM
     } catch {
       return { healthy: false, state: 'missing', health: null };
     }
+    if (!plan) {
+      plan = healthWaitPlan(data.Config?.Healthcheck);
+      if (plan.hasHealthcheck && plan.timeoutMs > 30_000) {
+        log?.(`Waiting for the healthcheck (up to ${Math.round(plan.timeoutMs / 1000)}s)…`);
+      }
+    }
+    if (deadline === null) deadline = Date.now() + plan.timeoutMs;
+
     state = data.State?.Status || 'unknown';
     health = data.State?.Health?.Status || null; // healthy|unhealthy|starting|null
+    // A restart since we started watching means it crashed and came back.
+    if (restartCount !== null && (data.RestartCount ?? 0) > restartCount) {
+      runningSince = null;
+    }
+    restartCount = data.RestartCount ?? 0;
+
     if (state === 'running') {
-      if (!health || health === 'healthy') return { healthy: true, state, health };
       if (health === 'unhealthy') return { healthy: false, state, health };
+      if (health === 'healthy') return { healthy: true, state, health };
+      if (!health) {
+        // No healthcheck: healthy once it has stayed up for stableMs.
+        if (runningSince === null) runningSince = Date.now();
+        if (Date.now() - runningSince >= plan.stableMs) return { healthy: true, state, health };
+      }
       // 'starting' — healthcheck still warming up; keep waiting.
-    } else if (state === 'exited' || state === 'dead') {
-      return { healthy: false, state, health };
+    } else {
+      runningSince = null;
+      if (state === 'exited' || state === 'dead') return { healthy: false, state, health };
     }
     // restarting / created / paused — keep polling until decisive or timeout.
     if (Date.now() >= deadline) return { healthy: false, state, health, timedOut: true };
@@ -751,9 +810,9 @@ function describeUnhealthy(h) {
  * container doesn't come up healthy, downgrade to a failure with an actionable
  * message (the new image is recorded so the user can revert).
  */
-async function withHealthCheck(name, result, expectRunning) {
+async function withHealthCheck(name, result, expectRunning, onLine) {
   if (!result.success || !expectRunning) return result;
-  const h = await verifyContainerHealth(name);
+  const h = await verifyContainerHealth(name, { log: (l) => onLine?.(l, 'stdout') });
   if (h.healthy) return { ...result, healthy: true, healthState: h.state };
   return {
     ...result,
@@ -777,7 +836,7 @@ async function withHealthCheck(name, result, expectRunning) {
  * @param {(line: string, stream: 'stdout'|'stderr') => void} [onLine]
  * @returns {Promise<{ success: boolean, message: string, oldDigest: string|null, newDigest: string|null }>}
  */
-export async function updateContainer(name, onLine) {
+export async function updateContainer(name, onLine, { targetImage = null } = {}) {
   let inspectData;
   try {
     inspectData = await docker.getContainer(name).inspect();
@@ -882,7 +941,7 @@ export async function updateContainer(name, onLine) {
     try {
       const [runningId, latestId] = await Promise.all([
         imageIdForContainerName(name),
-        docker.getImage(image).inspect().then((i) => i.Id),
+        docker.getImage(targetImage || image).inspect().then((i) => i.Id),
       ]);
       if (runningId && latestId && runningId !== latestId) {
         onLine?.('Container is not on the pulled image yet — forcing a recreate…', 'stdout');
@@ -913,7 +972,8 @@ export async function updateContainer(name, onLine) {
         newImageId,
         oldVersion,
       },
-      true
+      true,
+      onLine
     );
   }
 
@@ -933,7 +993,7 @@ export async function updateContainer(name, onLine) {
 
   let pullResult;
   try {
-    pullResult = await spawnAndStream('docker', ['pull', image], onLine);
+    pullResult = await spawnAndStream('docker', ['pull', targetImage || image], onLine);
   } catch (err) {
     return {
       success: false,
@@ -955,7 +1015,7 @@ export async function updateContainer(name, onLine) {
   const wasRunning = inspectData.State?.Running === true;
   try {
     const baseImageConfig = await imageConfigOf(inspectData.Image);
-    const createOpts = buildRecreateOptions(inspectData, baseImageConfig, image);
+    const createOpts = buildRecreateOptions(inspectData, baseImageConfig, targetImage || image);
     await replaceContainer(name, inspectData, createOpts, (l) => onLine?.(l, 'stdout'));
   } catch (err) {
     return {
@@ -979,8 +1039,123 @@ export async function updateContainer(name, onLine) {
       newImageId,
       oldVersion,
     },
-    wasRunning
+    wasRunning,
+    onLine
   );
+}
+
+/** Every compose file a container was created from (`-f a.yml -f b.yml`). */
+function composeConfigFiles(inspectData, composeInfo) {
+  const labels = inspectData.Config?.Labels || {};
+  const workingDir = composeInfo?.workingDir || labels[COMPOSE_WORKING_DIR_LABEL] || null;
+  const raw = labels[COMPOSE_CONFIG_FILES_LABEL];
+  const files = raw
+    ? raw
+        .split(',')
+        .map((f) => f.trim())
+        .filter(Boolean)
+        .map((f) => (workingDir && !path.isAbsolute(f) ? path.resolve(workingDir, f) : f))
+    : [];
+  if (files.length === 0 && composeInfo?.composeFile) files.push(composeInfo.composeFile);
+  return files;
+}
+
+/**
+ * Move a container to a newer version TAG (postgres:16.3 -> 16.4).
+ *
+ * Compose-managed: rewrites that service's `image:` line in the compose file
+ * (the last of its -f files that sets it, since later files override), keeping
+ * a `.dockpull.bak` copy, then runs the normal update (pull + up + health
+ * check). If the pull/up fails before the container changed, the file is put
+ * back. Standalone: pulls the new tag and recreates the container on it.
+ *
+ * @returns {Promise<object>} updateContainer's result plus `composeEdit`
+ *   ({ file, service, oldValue, newValue }) when a file was changed.
+ */
+export async function switchContainerTag(name, newTag, onLine) {
+  const log = (l) => onLine?.(l, 'stdout');
+  const inspectData = await docker.getContainer(name).inspect();
+  const image = trackedImageRef(inspectData);
+  const { registry, repository } = parseRef(image);
+  const targetImage = `${registry === 'docker.io' ? repository.replace(/^library\//, '') : `${registry}/${repository}`}:${newTag}`;
+  const composeInfo = await getComposeInfo(inspectData);
+
+  if (!(composeInfo?.composeFile && composeInfo?.service)) {
+    log(`Switching to ${targetImage}…`);
+    return updateContainer(name, onLine, { targetImage });
+  }
+
+  const { service } = composeInfo;
+  let edit = null;
+  let lastError = null;
+  for (const file of composeConfigFiles(inspectData, composeInfo).reverse()) {
+    let text;
+    try {
+      text = fs.readFileSync(file, 'utf8');
+    } catch (err) {
+      lastError = new ComposeEditError('file_unreadable', `Couldn't read ${file}: ${err.message}`);
+      continue;
+    }
+    try {
+      const r = rewriteServiceImageTag(text, service, image, newTag);
+      edit = { file, service, original: text, ...r };
+      break;
+    } catch (err) {
+      lastError = err;
+      if (err.code !== 'image_not_found') break; // found it but can't safely change it
+    }
+  }
+  if (!edit) {
+    return { success: false, message: lastError?.message || 'Couldn\'t update the compose file.', oldDigest: null, newDigest: null };
+  }
+
+  try {
+    fs.writeFileSync(`${edit.file}.dockpull.bak`, edit.original);
+    fs.writeFileSync(edit.file, edit.text);
+  } catch (err) {
+    return { success: false, message: `Couldn't write ${edit.file}: ${err.message}`, oldDigest: null, newDigest: null };
+  }
+  log(`Changed ${path.basename(edit.file)}: ${edit.oldValue} → ${edit.newValue}`);
+
+  const result = await updateContainer(name, onLine, { targetImage });
+  if (!result.newImageId) {
+    // Pull/up failed before the container moved: put the file back as it was.
+    try {
+      const current = fs.readFileSync(edit.file, 'utf8');
+      const restored = restoreServiceImage(current, service, edit.newValue, edit.oldValue);
+      if (restored !== null) {
+        fs.writeFileSync(edit.file, restored);
+        log(`Restored ${path.basename(edit.file)} to ${edit.oldValue}.`);
+      }
+    } catch (err) {
+      log(`Couldn't restore ${edit.file} (backup at ${edit.file}.dockpull.bak): ${err.message}`);
+    }
+    return result;
+  }
+  return {
+    ...result,
+    composeEdit: { file: edit.file, service, oldValue: edit.oldValue, newValue: edit.newValue },
+  };
+}
+
+/**
+ * Undo a switchContainerTag compose edit (used by revert), if the file still
+ * has the switched value. Returns true if the file was restored.
+ */
+export function restoreComposeEdit({ file, service, oldValue, newValue }, log) {
+  try {
+    const restored = restoreServiceImage(fs.readFileSync(file, 'utf8'), service, newValue, oldValue);
+    if (restored === null) {
+      log?.(`${path.basename(file)} no longer says ${newValue}; leaving it as is.`);
+      return false;
+    }
+    fs.writeFileSync(file, restored);
+    log?.(`Restored ${path.basename(file)}: ${newValue} → ${oldValue}`);
+    return true;
+  } catch (err) {
+    log?.(`Couldn't restore ${file}: ${err.message}`);
+    return false;
+  }
 }
 
 /**
@@ -1030,7 +1205,7 @@ export async function revertContainer(name, imageId, onLine, { imageRef = null, 
   }
 
   const newDigest = await currentDigestForContainerName(name);
-  const health = await verifyContainerHealth(name);
+  const health = await verifyContainerHealth(name, { log });
   if (!health.healthy) {
     return { success: false, message: `Reverted, but ${describeUnhealthy(health)}.`, oldDigest, newDigest };
   }
@@ -1049,7 +1224,7 @@ export async function getContainerImageMeta(name) {
   const image = trackedImageRef(inspectData);
   if (!image) return { image: null, currentVersion: null, sourceUrl: null };
   const { version, source } = await inspectImageMeta(inspectData.Image, image);
-  return { image, currentVersion: version, sourceUrl: source };
+  return { image, currentVersion: version, sourceUrl: source || knownSourceFor(image) };
 }
 
 /**

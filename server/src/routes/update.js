@@ -14,9 +14,19 @@
  */
 
 import express from 'express';
-import { docker, updateContainer, revertContainer, imageExists, trackedImageRef } from '../docker.js';
+import {
+  docker,
+  updateContainer,
+  revertContainer,
+  imageExists,
+  trackedImageRef,
+  switchContainerTag,
+  restoreComposeEdit,
+} from '../docker.js';
 import { normalizeRef } from '../reconcile.js';
 import * as sse from '../sse.js';
+import { getSettings } from '../settings.js';
+import { sendFailure } from '../notify.js';
 import * as db from '../db.js';
 import { validateContainerNameParam } from '../security.js';
 
@@ -26,6 +36,24 @@ export const updateRouter = express.Router();
 updateRouter.param('name', validateContainerNameParam);
 
 /**
+ * Best-effort "update failed" notification. Never throws or delays the result.
+ */
+function notifyFailure(failure) {
+  let s;
+  try {
+    s = getSettings();
+  } catch {
+    return;
+  }
+  if (!s.discordEnabled || !s.discordWebhookUrl || !s.notifyOnFailure) return;
+  sendFailure(s.notifyType, s.discordWebhookUrl, failure)
+    .then((r) => {
+      if (!r.ok) console.warn(`update.js: failure notification returned ${r.status}`);
+    })
+    .catch((err) => console.warn(`update.js: failure notification failed: ${err.message}`));
+}
+
+/**
  * Runs the update + records history + finishes the SSE session, detached
  * from the request lifecycle (the POST handler responds before this
  * settles). Errors here must never escape as an unhandled rejection.
@@ -33,9 +61,9 @@ updateRouter.param('name', validateContainerNameParam);
  * @param {string} name
  * @param {string|null} image - configured image ref, for the history row.
  */
-async function runUpdate(name, image) {
+async function runUpdate(name, image, { run = updateContainer } = {}) {
   try {
-    const result = await updateContainer(name, (line, stream) => sse.pushLog(name, line, stream));
+    const result = await run(name, (line, stream) => sse.pushLog(name, line, stream));
     const oldVersion = db.getImageVersion(result.oldDigest) ?? result.oldVersion ?? null;
     db.recordUpdate({
       container_name: name,
@@ -72,9 +100,11 @@ async function runUpdate(name, image) {
         image_ref: image,
         old_digest: result.oldDigest,
         old_version: oldVersion,
+        compose_edit: result.composeEdit ?? null,
       });
     }
     sse.finish(name, { success: result.success, message: result.message });
+    if (!result.success) notifyFailure({ name, image, action: 'update', message: result.message });
   } catch (err) {
     db.recordUpdate({
       container_name: name,
@@ -85,6 +115,7 @@ async function runUpdate(name, image) {
       message: err.message,
     });
     sse.finish(name, { success: false, message: err.message });
+    notifyFailure({ name, image, action: 'update', message: err.message });
   } finally {
     // Let other connected dashboards refresh their list/badges.
     sse.broadcastGlobal({ type: 'containers-changed' });
@@ -127,6 +158,11 @@ updateRouter.post('/api/update/:name', async (req, res) => {
  */
 async function runRevert(name, image, rollback) {
   try {
+    // Undo a tag switch's compose-file edit too, so the file and the container
+    // agree (and a later `compose up` doesn't move it forward again).
+    if (rollback.compose_edit) {
+      restoreComposeEdit(rollback.compose_edit, (l) => sse.pushLog(name, l, 'stdout'));
+    }
     const result = await revertContainer(name, rollback.image_id, (line, stream) => sse.pushLog(name, line, stream), {
       imageRef: image,
       digest: rollback.old_digest,
@@ -146,6 +182,7 @@ async function runRevert(name, image, rollback) {
     // re-detected as available on the next check.
     if (result.success) db.deleteRollbackPoint(name);
     sse.finish(name, { success: result.success, message: result.message });
+    if (!result.success) notifyFailure({ name, image, action: 'revert', message: result.message });
   } catch (err) {
     db.recordUpdate({
       container_name: name,
@@ -156,6 +193,7 @@ async function runRevert(name, image, rollback) {
       message: err.message,
     });
     sse.finish(name, { success: false, message: err.message });
+    notifyFailure({ name, image, action: 'revert', message: err.message });
   } finally {
     sse.broadcastGlobal({ type: 'containers-changed' });
   }
@@ -203,6 +241,53 @@ updateRouter.post('/api/update/:name/revert', async (req, res) => {
   const image = rollback.image_ref ?? trackedImageRef(inspectData);
   void runRevert(name, image, rollback);
 
+  return res.status(200).json({ streamId: name });
+});
+
+// Docker tag grammar: [A-Za-z0-9_][A-Za-z0-9_.-]{0,127}
+const TAG_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
+
+/**
+ * Move a container to a newer version tag the last check found (see
+ * tag_updates). Only tags DockPull itself offered are accepted.
+ */
+updateRouter.post('/api/update/:name/switch-tag', async (req, res) => {
+  const { name } = req.params;
+  const tag = req.body?.tag;
+  if (typeof tag !== 'string' || !TAG_RE.test(tag)) {
+    return res.status(400).json({ error: 'invalid_tag' });
+  }
+
+  let inspectData;
+  try {
+    inspectData = await docker.getContainer(name).inspect();
+  } catch (err) {
+    if (err.statusCode === 404) return res.status(404).json({ error: 'not_found' });
+    return res.status(503).json({ error: 'docker_unavailable' });
+  }
+  const image = trackedImageRef(inspectData);
+  let ref;
+  try {
+    ref = normalizeRef(image);
+  } catch {
+    return res.status(400).json({ error: 'invalid_image' });
+  }
+  const offered = db.getTagUpdate(ref);
+  if (!offered || (offered.same_major !== tag && offered.next_major !== tag)) {
+    return res.status(409).json({
+      error: 'tag_not_offered',
+      message: `${tag} isn't a newer version DockPull found for this image. Run a check first.`,
+    });
+  }
+
+  if (sse.isActive(name)) {
+    return res.status(409).json({ error: 'update_in_progress' });
+  }
+  sse.startSession(name);
+  // The tag_updates row belongs to the OLD tag and may still apply to other
+  // containers running it, so it's left alone; the switched container now has
+  // a new ref, whose newer tags the next check works out.
+  void runUpdate(name, image, { run: (n, onLine) => switchContainerTag(n, tag, onLine) });
   return res.status(200).json({ streamId: name });
 });
 

@@ -57,6 +57,15 @@ CREATE TABLE IF NOT EXISTS rollback_points (
   old_version TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS tag_updates (
+  normalized_ref TEXT PRIMARY KEY,
+  current_tag TEXT NOT NULL,
+  same_major TEXT,
+  next_major TEXT,
+  dismissed_tag TEXT,
+  notified_key TEXT,
+  checked_at TEXT DEFAULT (datetime('now'))
+);
 CREATE INDEX IF NOT EXISTS idx_events_ref ON update_events(normalized_ref, resolved);
 CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC);
 `);
@@ -83,6 +92,13 @@ CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC
   }
 }
 
+// rollback_points: a tag switch also changed the compose file; remember how,
+// so reverting can put the old tag back.
+{
+  const cols = db.prepare('PRAGMA table_info(rollback_points)').all().map((col) => col.name);
+  if (!cols.includes('compose_edit')) db.exec('ALTER TABLE rollback_points ADD COLUMN compose_edit TEXT');
+}
+
 // update_history: remember versions on the row itself, for when an image's
 // digest is unknown (so the digest→version lookup can't recover them later).
 {
@@ -92,6 +108,25 @@ CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC
 }
 
 const stmts = {
+  importHistoryRow: db.prepare(`
+    INSERT INTO update_history (container_name, image, old_digest, new_digest, old_version, new_version, status, message, created_at)
+    VALUES (@container_name, @image, @old_digest, @new_digest, @old_version, @new_version, @status, @message, @created_at)
+  `),
+  countHistory: db.prepare(`SELECT COUNT(*) AS n FROM update_history`),
+  setTagUpdate: db.prepare(`
+    INSERT INTO tag_updates (normalized_ref, current_tag, same_major, next_major, checked_at)
+    VALUES (@normalized_ref, @current_tag, @same_major, @next_major, datetime('now'))
+    ON CONFLICT(normalized_ref) DO UPDATE SET
+      current_tag = excluded.current_tag,
+      same_major = excluded.same_major,
+      next_major = excluded.next_major,
+      checked_at = excluded.checked_at
+  `),
+  getTagUpdate: db.prepare(`SELECT * FROM tag_updates WHERE normalized_ref = ? LIMIT 1`),
+  getAllTagUpdates: db.prepare(`SELECT * FROM tag_updates`),
+  deleteTagUpdate: db.prepare(`DELETE FROM tag_updates WHERE normalized_ref = ?`),
+  dismissTag: db.prepare(`UPDATE tag_updates SET dismissed_tag = ? WHERE normalized_ref = ?`),
+  markTagNotified: db.prepare(`UPDATE tag_updates SET notified_key = ? WHERE normalized_ref = ?`),
   recordEvent: db.prepare(`
     INSERT INTO update_events (image, normalized_ref, status, digest, available_version, breaking, raw_json)
     VALUES (@image, @normalized_ref, @status, @digest, @available_version, @breaking, @raw_json)
@@ -133,13 +168,14 @@ const stmts = {
     SELECT value FROM app_meta WHERE key = ? LIMIT 1
   `),
   setRollbackPoint: db.prepare(`
-    INSERT INTO rollback_points (container_name, image_id, image_ref, old_digest, old_version, created_at)
-    VALUES (@container_name, @image_id, @image_ref, @old_digest, @old_version, datetime('now'))
+    INSERT INTO rollback_points (container_name, image_id, image_ref, old_digest, old_version, compose_edit, created_at)
+    VALUES (@container_name, @image_id, @image_ref, @old_digest, @old_version, @compose_edit, datetime('now'))
     ON CONFLICT(container_name) DO UPDATE SET
       image_id = excluded.image_id,
       image_ref = excluded.image_ref,
       old_digest = excluded.old_digest,
       old_version = excluded.old_version,
+      compose_edit = excluded.compose_edit,
       created_at = excluded.created_at
   `),
   getRollbackPoint: db.prepare(`
@@ -228,6 +264,32 @@ export function setLatestEventSkipped(normalized_ref, skipped) {
   return stmts.setLatestEventSkipped.run(skipped ? 1 : 0, normalized_ref).changes > 0;
 }
 
+/**
+ * Newer version TAGS for a ref (e.g. running postgres:16.3, registry has 16.4
+ * and 17.1). Rows with nothing newer are removed. The dismissed tag survives
+ * re-checks so a skipped tag stays hidden until an even newer one appears.
+ */
+export function setTagUpdate({ normalized_ref, current_tag, same_major, next_major }) {
+  if (!same_major && !next_major) return stmts.deleteTagUpdate.run(normalized_ref);
+  return stmts.setTagUpdate.run({ normalized_ref, current_tag, same_major: same_major ?? null, next_major: next_major ?? null });
+}
+
+export function getTagUpdate(normalized_ref) {
+  return stmts.getTagUpdate.get(normalized_ref) || null;
+}
+
+export function getAllTagUpdates() {
+  return stmts.getAllTagUpdates.all();
+}
+
+export function dismissTag(normalized_ref, tag) {
+  return stmts.dismissTag.run(tag ?? null, normalized_ref).changes > 0;
+}
+
+export function markTagNotified(normalized_ref, key) {
+  return stmts.markTagNotified.run(key ?? null, normalized_ref);
+}
+
 export function updateEventAvailableVersion(normalized_ref, digest, available_version) {
   return stmts.updateEventAvailableVersion.run(available_version ?? null, normalized_ref, digest);
 }
@@ -267,14 +329,29 @@ export function getMeta(key) {
  * Remember how to undo the most recent update of a container (the previous
  * local image ID + what it was), so the dashboard can offer a one-click revert.
  */
-export function setRollbackPoint({ container_name, image_id, image_ref = null, old_digest = null, old_version = null }) {
+export function setRollbackPoint({ container_name, image_id, image_ref = null, old_digest = null, old_version = null, compose_edit = null }) {
   if (!container_name || !image_id) return undefined;
-  return stmts.setRollbackPoint.run({ container_name, image_id, image_ref, old_digest, old_version });
+  return stmts.setRollbackPoint.run({
+    container_name,
+    image_id,
+    image_ref,
+    old_digest,
+    old_version,
+    compose_edit: compose_edit ? JSON.stringify(compose_edit) : null,
+  });
 }
 
 export function getRollbackPoint(container_name) {
   if (!container_name) return null;
-  return stmts.getRollbackPoint.get(container_name) || null;
+  const row = stmts.getRollbackPoint.get(container_name);
+  if (!row) return null;
+  let composeEdit = null;
+  try {
+    composeEdit = row.compose_edit ? JSON.parse(row.compose_edit) : null;
+  } catch {
+    composeEdit = null;
+  }
+  return { ...row, compose_edit: composeEdit };
 }
 
 export function deleteRollbackPoint(container_name) {
@@ -325,6 +402,19 @@ export function getHistory({ containerName, limit = 50, offset = 0 } = {}) {
     return stmts.getHistoryByContainer.all(containerName, limit, offset);
   }
   return stmts.getHistoryAll.all(limit, offset);
+}
+
+export function countHistory() {
+  return stmts.countHistory.get().n;
+}
+
+const importHistoryTxn = db.transaction((rows) => {
+  for (const r of rows) stmts.importHistoryRow.run(r);
+});
+
+/** Insert history rows from a backup (already validated), in one transaction. */
+export function importHistory(rows) {
+  importHistoryTxn(rows);
 }
 
 /** Delete all update-history rows. Returns the better-sqlite3 run info. */

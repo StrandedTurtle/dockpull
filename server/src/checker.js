@@ -8,9 +8,11 @@
  */
 
 import { listContainers } from './docker.js';
-import { getRemoteDigest, getRemoteVersion } from './registry.js';
+import { getRemoteDigest, getRemoteVersion, listTags } from './registry.js';
 import { digestsEqual, isRunningDigest } from './reconcile.js';
-import { isMeaningfulVersion } from './version.js';
+import { isMeaningfulVersion, parseVersionTag, findNewerTags } from './version.js';
+import { parseRef } from './reconcile.js';
+import { getSettings } from './settings.js';
 import {
   parseGitHubRepo,
   getLatestReleaseTag,
@@ -127,12 +129,50 @@ async function doCheck() {
   let errors = 0;
   const errored = []; // { ref, image, message } per failed container check
 
+  // Newer-tag detection: one tag listing per repository per check, shared by
+  // every tag of it that's running. Best-effort — a failure here never counts
+  // as a check error (the digest check above is what matters).
+  const tagPolicy = getSettings().tagUpdates;
+  const tagListCache = new Map();
+  async function checkNewerTags(c) {
+    if (tagPolicy === 'off') return;
+    let parsed;
+    try {
+      parsed = parseRef(c.image);
+    } catch {
+      return;
+    }
+    if (!parsed.tag || !parseVersionTag(parsed.tag)) {
+      db.setTagUpdate({ normalized_ref: c.normalizedRef, current_tag: parsed.tag || '' }); // clears any stale row
+      return;
+    }
+    const repoKey = `${parsed.registry}/${parsed.repository}`;
+    if (!tagListCache.has(repoKey)) tagListCache.set(repoKey, listTags(c.image).catch((err) => err));
+    const tags = await tagListCache.get(repoKey);
+    if (tags instanceof Error) {
+      console.warn(`checker: couldn't list tags for ${repoKey}: ${tags.message}`);
+      return;
+    }
+    const { sameMajor, nextMajor } = findNewerTags(parsed.tag, tags);
+    db.setTagUpdate({
+      normalized_ref: c.normalizedRef,
+      current_tag: parsed.tag,
+      same_major: sameMajor,
+      next_major: nextMajor,
+    });
+  }
+
   let idx = 0;
   async function worker() {
     while (idx < items.length) {
       const group = items[idx];
       idx += 1;
       let c = group[0];
+      try {
+        await checkNewerTags(c);
+      } catch (err) {
+        console.warn(`checker: tag check failed for ${c.image}: ${err.message}`);
+      }
       try {
         const remote = await getRemoteDigest(c.image);
         checked += 1;

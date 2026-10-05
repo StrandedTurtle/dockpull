@@ -93,3 +93,32 @@ describe('requireAuth', () => {
     assert.equal(nextCalled, true);
   });
 });
+
+import { logoutAllHandler, setSessionGenerationStore } from '../src/auth.js';
+
+test('sign out everywhere: old cookies stop working, the caller gets a fresh one', () => {
+  let gen = 0;
+  setSessionGenerationStore({ get: () => gen, set: (n) => (gen = n) });
+  try {
+    const before = sessionCookieValue(Date.now() + 60_000);
+    let issued = null;
+    let status = null;
+    const res = {
+      cookie: (_n, v) => (issued = v),
+      status: (s) => ((status = s), { json: () => {} }),
+    };
+    logoutAllHandler(makeReq({ signedCookies: { dockpull_session: before } }), res);
+    assert.equal(status, 200);
+    assert.equal(gen, 1);
+    assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: before } })), false);
+    assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: issued } })), true);
+
+    // Without a valid session it refuses and changes nothing.
+    status = null;
+    logoutAllHandler(makeReq({ signedCookies: { dockpull_session: before } }), res);
+    assert.equal(status, 401);
+    assert.equal(gen, 1);
+  } finally {
+    setSessionGenerationStore({ get: () => 0, set: () => {} });
+  }
+});

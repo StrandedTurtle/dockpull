@@ -6,7 +6,8 @@ import cookieParser from 'cookie-parser';
 import { config, assertRequiredConfig } from './config.js';
 // Importing db creates the data dir + tables as a side effect on load.
 import db from './db.js';
-import { authRouter, requireAuth } from './auth.js';
+import { authRouter, requireAuth, setSessionGenerationStore } from './auth.js';
+import { getMeta, setMeta } from './db.js';
 import { apiRouter } from './routes/api.js';
 import { updateRouter } from './routes/update.js';
 import { securityHeaders, requireCsrfHeader } from './security.js';
@@ -23,6 +24,18 @@ if (process.env.SKIP_CONFIG_CHECK !== '1') {
   }
 } else {
   console.warn('SKIP_CONFIG_CHECK=1 set — skipping required env var validation.');
+}
+
+// Persist the "sign out everywhere" counter (cached; read on every request).
+{
+  let generation = Number(getMeta('sessionGeneration')) || 0;
+  setSessionGenerationStore({
+    get: () => generation,
+    set: (n) => {
+      generation = n;
+      setMeta('sessionGeneration', n);
+    },
+  });
 }
 
 const app = express();
@@ -47,7 +60,8 @@ if (config.BASE_PATH) {
 // Security headers for every response (no external dependency).
 app.use(securityHeaders({ https: config.BASE_URL.startsWith('https') }));
 
-app.use(express.json());
+// Backups (settings + up to 5000 history rows) can exceed the 100kb default.
+app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser(config.SESSION_SECRET));
 // Before every router (login included): unsafe /api methods need X-DockPull.
 app.use(requireCsrfHeader);

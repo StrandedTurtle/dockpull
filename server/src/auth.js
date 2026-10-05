@@ -94,9 +94,42 @@ function isValidPassword(provided) {
 function passwordFingerprint() {
   return crypto
     .createHmac('sha256', config.SESSION_SECRET || '')
-    .update(`dockpull-session:${config.ADMIN_PASSWORD || ''}`)
+    .update(`dockpull-session:${config.ADMIN_PASSWORD || ''}:${sessionGeneration.get()}`)
     .digest('hex')
     .slice(0, 16);
+}
+
+// "Sign out everywhere" bumps this number; it's part of every cookie's
+// fingerprint, so all cookies issued before the bump stop matching. Persisted
+// via an injected store (index.js wires it to the DB) so this module stays
+// importable without a database (tests).
+let sessionGeneration = { get: () => 0, set: () => {} };
+
+export function setSessionGenerationStore(store) {
+  sessionGeneration = store;
+}
+
+function setSessionCookie(res) {
+  const expiry = Date.now() + config.SESSION_TTL * 1000;
+  res.cookie(SESSION_COOKIE, sessionCookieValue(expiry), {
+    signed: true,
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: config.BASE_URL.startsWith('https'),
+    maxAge: config.SESSION_TTL * 1000,
+    path: config.BASE_PATH || '/',
+  });
+}
+
+/**
+ * POST /api/auth/logout-all — invalidate every session, then give the caller a
+ * fresh cookie so only THIS device stays signed in. Requires a valid session.
+ */
+export function logoutAllHandler(req, res) {
+  if (!isValidSession(req)) return res.status(401).json({ error: 'unauthorized' });
+  sessionGeneration.set(sessionGeneration.get() + 1);
+  setSessionCookie(res);
+  return res.status(200).json({ ok: true });
 }
 
 /** Session cookie value: `<expiry ms>.<password fingerprint>`. */
@@ -145,15 +178,7 @@ export function loginHandler(req, res) {
   }
 
   clearLoginFailures(ip);
-  const expiry = Date.now() + config.SESSION_TTL * 1000;
-  res.cookie(SESSION_COOKIE, sessionCookieValue(expiry), {
-    signed: true,
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: config.BASE_URL.startsWith('https'),
-    maxAge: config.SESSION_TTL * 1000,
-    path: config.BASE_PATH || '/',
-  });
+  setSessionCookie(res);
 
   return res.status(200).json({ ok: true });
 }
@@ -193,5 +218,6 @@ export function requireAuth(req, res, next) {
 authRouter.post('/api/auth/login', loginHandler);
 authRouter.post('/api/auth/logout', logoutHandler);
 authRouter.get('/api/auth/me', meHandler);
+authRouter.post('/api/auth/logout-all', logoutAllHandler);
 
 export default authRouter;

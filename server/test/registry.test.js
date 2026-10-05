@@ -56,3 +56,16 @@ test('registryBaseUrl: loopback registries use http (like Docker), everything el
   assert.equal(registryBaseUrl('registry.local:5000'), 'https://registry.local:5000');
   assert.equal(registryBaseUrl('localhost.evil.com'), 'https://localhost.evil.com');
 });
+
+import { nextPageUrl } from '../src/registry.js';
+
+test('nextPageUrl: follows same-origin rel=next links only', () => {
+  const base = 'https://registry-1.docker.io';
+  assert.equal(
+    nextPageUrl('</v2/library/postgres/tags/list?last=16.3&n=1000>; rel="next"', base),
+    'https://registry-1.docker.io/v2/library/postgres/tags/list?last=16.3&n=1000'
+  );
+  assert.equal(nextPageUrl('<https://evil.example/v2/x/tags/list>; rel="next"', base), null);
+  assert.equal(nextPageUrl(null, base), null);
+  assert.equal(nextPageUrl('</v2/x>; rel="prev"', base), null);
+});
