@@ -44,3 +44,15 @@ test('pickPlatformManifest: returns null for empty/non-array input', () => {
   assert.equal(pickPlatformManifest(null), null);
   assert.equal(pickPlatformManifest(undefined), null);
 });
+
+import { registryBaseUrl } from '../src/registry.js';
+
+test('registryBaseUrl: loopback registries use http (like Docker), everything else https', () => {
+  assert.equal(registryBaseUrl('localhost:5000'), 'http://localhost:5000');
+  assert.equal(registryBaseUrl('127.0.0.1:5005'), 'http://127.0.0.1:5005');
+  assert.equal(registryBaseUrl('[::1]:5000'), 'http://[::1]:5000');
+  assert.equal(registryBaseUrl('docker.io'), 'https://registry-1.docker.io');
+  assert.equal(registryBaseUrl('ghcr.io'), 'https://ghcr.io');
+  assert.equal(registryBaseUrl('registry.local:5000'), 'https://registry.local:5000');
+  assert.equal(registryBaseUrl('localhost.evil.com'), 'https://localhost.evil.com');
+});

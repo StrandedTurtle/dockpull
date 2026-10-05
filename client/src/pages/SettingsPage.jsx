@@ -16,7 +16,7 @@ import { useTheme } from '../hooks/useTheme.js';
 // Human-readable byte count: whole bytes below 1 KB, one decimal above.
 function formatBytes(n) {
   if (!Number.isFinite(n) || n < 1024) return `${n} B`;
-  const units = ['KB', 'MB', 'GB'];
+  const units = ['KB', 'MB', 'GB', 'TB'];
   let value = n;
   let i = -1;
   do {
@@ -195,11 +195,14 @@ export default function SettingsPage({ onPruneComplete } = {}) {
     setPruning(true);
     setPruneStatus('');
     try {
-      const { deleted = 0, spaceReclaimed = 0 } = (await pruneImages(ids)) || {};
+      const { deleted = 0, spaceReclaimed = 0, revertsRemoved = [] } = (await pruneImages(ids)) || {};
+      const revertNote = revertsRemoved.length
+        ? ` Revert is no longer available for ${revertsRemoved.join(', ')}.`
+        : '';
       setPruneStatus(
-        deleted > 0
+        (deleted > 0
           ? `Freed ${formatBytes(spaceReclaimed)} (${deleted} layer${deleted === 1 ? '' : 's'} removed).`
-          : 'Nothing to prune — no dangling layers found.'
+          : 'Nothing to prune — no dangling layers found.') + revertNote
       );
       if (deleted > 0) {
         onPruneComplete?.();
@@ -511,7 +514,7 @@ export default function SettingsPage({ onPruneComplete } = {}) {
             dialogClassName="confirm-dialog--wide"
             confirmLabel={
               pruneSelection.length
-                ? `Prune ${pruneSelection.length} (${formatBytes(
+                ? `Prune ${pruneSelection.length} (~${formatBytes(
                     pruneSelection.reduce((sum, img) => sum + (img.size || 0), 0)
                   )})`
                 : 'Prune'
@@ -527,7 +530,15 @@ export default function SettingsPage({ onPruneComplete } = {}) {
             <p className="confirm-message">
               Leftover layers from image updates. Remove any row with ✕ to keep that layer —
               it'll reappear here next time. Tagged images and anything in use are never touched.
+              Sizes are what removing each one should free (layers shared with images you still
+              use aren't counted).
             </p>
+            {pruneSelection.some((img) => img.fromContainer) && (
+              <p className="confirm-message prune-revert-warning">
+                ⚠ Rows named after a container are its previous version — pruning one removes the
+                option to revert that container's last update.
+              </p>
+            )}
             {pruneSelection.length === 0 ? (
               <p className="prune-empty">All layers excluded — nothing will be pruned.</p>
             ) : (
@@ -550,7 +561,16 @@ export default function SettingsPage({ onPruneComplete } = {}) {
                           </span>
                           <span className="prune-source-id">{img.id}</span>
                         </td>
-                        <td className="prune-size">{formatBytes(img.size || 0)}</td>
+                        <td
+                          className="prune-size"
+                          title={
+                            img.fullSize && img.fullSize !== img.size
+                              ? `Whole image is ${formatBytes(img.fullSize)}; the rest is shared with other images and stays.`
+                              : undefined
+                          }
+                        >
+                          {formatBytes(img.size || 0)}
+                        </td>
                         <td className="prune-created">{formatAge(img.created)}</td>
                         <td className="prune-remove-cell">
                           <button

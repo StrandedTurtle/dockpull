@@ -42,7 +42,13 @@ async function request(method, path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     credentials: 'include',
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    headers: {
+      // Required by the server on every state-changing request: a cross-site
+      // page can't add custom headers without a CORS preflight (which the
+      // server never grants), so this blocks CSRF from other sites/ports.
+      'X-DockPull': '1',
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
@@ -54,7 +60,7 @@ async function request(method, path, body) {
       if (onUnauthorized) onUnauthorized();
     }
     const errMessage =
-      (data && typeof data === 'object' && data.error) ||
+      (data && typeof data === 'object' && (data.message || data.error)) ||
       (typeof data === 'string' && data) ||
       `${method} ${path} failed with ${res.status}`;
     throw new ApiError(errMessage, res.status, data);
@@ -155,6 +161,17 @@ export function pin(ref) {
 
 export function unpin(ref) {
   return del(`/pin/${encodeURIComponent(ref)}`);
+}
+
+// --- Skipping a specific update ---
+
+// Dismiss the currently offered build for an image until a newer one appears.
+export function skipUpdate(ref) {
+  return post('/skip', { ref });
+}
+
+export function unskipUpdate(ref) {
+  return del(`/skip/${encodeURIComponent(ref)}`);
 }
 
 // --- Settings ---

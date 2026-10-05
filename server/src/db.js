@@ -76,6 +76,19 @@ CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC
   if (!cols.includes('breaking')) {
     db.exec('ALTER TABLE update_events ADD COLUMN breaking INTEGER DEFAULT 0');
   }
+  // `skipped`: the user dismissed this specific available build ("Skip this
+  // update"). A newer build creates a fresh, unskipped event.
+  if (!cols.includes('skipped')) {
+    db.exec('ALTER TABLE update_events ADD COLUMN skipped INTEGER DEFAULT 0');
+  }
+}
+
+// update_history: remember versions on the row itself, for when an image's
+// digest is unknown (so the digest→version lookup can't recover them later).
+{
+  const cols = db.prepare('PRAGMA table_info(update_history)').all().map((col) => col.name);
+  if (!cols.includes('old_version')) db.exec('ALTER TABLE update_history ADD COLUMN old_version TEXT');
+  if (!cols.includes('new_version')) db.exec('ALTER TABLE update_history ADD COLUMN new_version TEXT');
 }
 
 const stmts = {
@@ -91,6 +104,14 @@ const stmts = {
   resolveEventsForRef: db.prepare(`
     UPDATE update_events SET resolved = 1
     WHERE normalized_ref = ? AND resolved = 0
+  `),
+  setLatestEventSkipped: db.prepare(`
+    UPDATE update_events SET skipped = ?
+    WHERE id = (
+      SELECT id FROM update_events
+      WHERE normalized_ref = ? AND resolved = 0
+      ORDER BY id DESC LIMIT 1
+    )
   `),
   updateEventAvailableVersion: db.prepare(`
     UPDATE update_events SET available_version = ?
@@ -131,8 +152,8 @@ const stmts = {
     DELETE FROM rollback_points WHERE container_name = ?
   `),
   recordUpdate: db.prepare(`
-    INSERT INTO update_history (container_name, image, old_digest, new_digest, status, message)
-    VALUES (@container_name, @image, @old_digest, @new_digest, @status, @message)
+    INSERT INTO update_history (container_name, image, old_digest, new_digest, old_version, new_version, status, message)
+    VALUES (@container_name, @image, @old_digest, @new_digest, @old_version, @new_version, @status, @message)
   `),
   getHistoryAll: db.prepare(`
     SELECT * FROM update_history
@@ -199,6 +220,14 @@ export function resolveEventsForRef(normalized_ref) {
   return stmts.resolveEventsForRef.run(normalized_ref);
 }
 
+/**
+ * Skip (or un-skip) the currently offered update for a ref — i.e. its latest
+ * unresolved event. Returns true if there was one to change.
+ */
+export function setLatestEventSkipped(normalized_ref, skipped) {
+  return stmts.setLatestEventSkipped.run(skipped ? 1 : 0, normalized_ref).changes > 0;
+}
+
 export function updateEventAvailableVersion(normalized_ref, digest, available_version) {
   return stmts.updateEventAvailableVersion.run(available_version ?? null, normalized_ref, digest);
 }
@@ -253,6 +282,22 @@ export function deleteRollbackPoint(container_name) {
 }
 
 /**
+ * Forget rollback points whose saved image is gone (e.g. it was pruned), so the
+ * dashboard stops offering a Revert that can't work. `shortIds` are 12-char
+ * image IDs. Returns the affected container names.
+ */
+export function deleteRollbackPointsForImages(shortIds) {
+  const gone = new Set(shortIds || []);
+  if (gone.size === 0) return [];
+  const affected = stmts.getAllRollbackPoints
+    .all()
+    .filter((r) => gone.has(String(r.image_id || '').replace(/^sha256:/, '').slice(0, 12)))
+    .map((r) => r.container_name);
+  for (const name of affected) stmts.deleteRollbackPoint.run(name);
+  return affected;
+}
+
+/**
  * Every container's remembered previous image ID (container_name, image_id
  * pairs only) — used to attribute a dangling image back to the container it
  * was replaced on, for the prune preview. One row per container (the most
@@ -262,12 +307,14 @@ export function getAllRollbackPoints() {
   return stmts.getAllRollbackPoints.all();
 }
 
-export function recordUpdate({ container_name, image, old_digest, new_digest, status, message }) {
+export function recordUpdate({ container_name, image, old_digest, new_digest, old_version, new_version, status, message }) {
   return stmts.recordUpdate.run({
     container_name,
     image,
     old_digest: old_digest ?? null,
     new_digest: new_digest ?? null,
+    old_version: old_version ?? null,
+    new_version: new_version ?? null,
     status,
     message: message ?? null,
   });

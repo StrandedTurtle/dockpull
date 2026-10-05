@@ -11,6 +11,8 @@ import { API_BASE } from '../api.js';
  * The stream is keyed by container name (not the streamId returned by
  * POST /api/update/:name — that value is informational only).
  */
+const RECONNECT_GRACE_MS = 30_000;
+
 export function useSSE(name, active) {
   const [lines, setLines] = useState([]);
   const [result, setResult] = useState(null);
@@ -34,9 +36,16 @@ export function useSSE(name, active) {
 
     const es = new EventSource(`${API_BASE}/update/${encodeURIComponent(name)}/stream`);
     esRef.current = es;
+    // Pending "give up reconnecting" timer while the browser retries.
+    let giveUp = null;
 
     es.onopen = () => {
+      clearTimeout(giveUp);
+      giveUp = null;
       setConnected(true);
+      // The server replays the whole buffered log to every (re)connection, so
+      // start fresh rather than duplicating what we already showed.
+      setLines([]);
     };
 
     es.onmessage = (event) => {
@@ -61,10 +70,23 @@ export function useSSE(name, active) {
 
     es.onerror = () => {
       setConnected(false);
-      setError('Connection lost');
+      // A blip (phone sleeping, proxy hiccup) is not a failed update: the
+      // browser reconnects on its own and the update keeps running server-side.
+      // Only report failure if the stream is closed for good, or stays down.
+      if (es.readyState === EventSource.CLOSED) {
+        setError('Connection lost');
+        return;
+      }
+      if (!giveUp) {
+        giveUp = setTimeout(() => {
+          es.close();
+          setError('Connection lost — the update may still be running. Refresh to check.');
+        }, RECONNECT_GRACE_MS);
+      }
     };
 
     return () => {
+      clearTimeout(giveUp);
       es.close();
       esRef.current = null;
     };

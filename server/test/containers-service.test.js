@@ -158,6 +158,7 @@ describe('buildContainerItems', () => {
       availableDigest: null,
       availableVersion: null,
       breakingRisk: false,
+      skipped: false,
       pinned: false,
       canRevert: false,
       rollbackVersion: null,
@@ -205,5 +206,36 @@ describe('buildContainerItems', () => {
     assert.equal(items[1].updateAvailable, false);
     assert.equal(items[1].availableDigest, null);
     assert.deepEqual(refsToResolve, ['docker.io/library/b:latest']);
+  });
+});
+
+describe('buildContainerItems: image known under several repo digests', () => {
+  // Regression for "says there's an update but it's the same version": the
+  // running image has two RepoDigests for its repo (e.g. the publisher
+  // re-pushed the tag's index). The registry's current digest is the second
+  // one — that's the SAME image, not an update.
+  test('event digest matching any of the running repo digests -> no update, event resolved', () => {
+    const containers = [
+      makeContainer({ currentDigest: 'sha256:aaa', currentDigests: ['sha256:aaa', 'sha256:bbb'] }),
+    ];
+    const { items, refsToResolve } = buildContainerItems({
+      containers,
+      lookupEvent: () => ({ digest: 'sha256:bbb', available_version: '1.0.0' }),
+      isPinned: () => false,
+    });
+    assert.equal(items[0].updateAvailable, false);
+    assert.deepEqual(refsToResolve, ['docker.io/library/nginx:latest']);
+  });
+
+  test('a genuinely different digest is still an update', () => {
+    const containers = [
+      makeContainer({ currentDigest: 'sha256:aaa', currentDigests: ['sha256:aaa', 'sha256:bbb'] }),
+    ];
+    const { items } = buildContainerItems({
+      containers,
+      lookupEvent: () => ({ digest: 'sha256:ccc' }),
+      isPinned: () => false,
+    });
+    assert.equal(items[0].updateAvailable, true);
   });
 });

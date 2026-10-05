@@ -17,7 +17,14 @@ DockPull is built for a **trusted LAN / homelab** behind authentication. It is
 - **Login rate-limiting / lockout** per client IP (10 failures → 15-minute
   lockout) to blunt brute-force.
 - **All `/api/*` routes require the session cookie** (only `GET /api/health`,
-  login, and `me` are public).
+  login, and `me` are public). The cookie is tied to the current
+  `ADMIN_PASSWORD`, so **changing the password signs out every session**.
+- **CSRF protection.** State-changing API requests must carry an `X-DockPull`
+  header, which another site (or another app on a different port of the same
+  host — still "same-site" to the browser) can't add to a forged request.
+- **Container names are validated** before they reach the Docker API.
+- **Registry credentials** from your Docker config are only ever sent to
+  `https` token servers.
 - **No shell interpolation.** Docker actions run via `spawn(..., {shell:false})`
   with argument arrays — never a shell string — so container/label values can't
   inject commands.

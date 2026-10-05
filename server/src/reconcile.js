@@ -152,6 +152,22 @@ export function digestsEqual(a, b) {
 }
 
 /**
+ * True if `digest` equals the primary `currentDigest` or any of the image's
+ * other repo digests (see docker.js pickRepoDigests — one local image can be
+ * known under several registry digests, and any of them means "this exact
+ * image is what's running").
+ *
+ * @param {string|null|undefined} digest
+ * @param {string|null|undefined} currentDigest
+ * @param {Array<string>|null|undefined} [currentDigests]
+ * @returns {boolean}
+ */
+export function isRunningDigest(digest, currentDigest, currentDigests) {
+  if (digestsEqual(digest, currentDigest)) return true;
+  return Array.isArray(currentDigests) && currentDigests.some((d) => digestsEqual(digest, d));
+}
+
+/**
  * @param {string|null|undefined} digest
  * @returns {string|null} trimmed, lowercased `sha256:...` string, or null
  *   if `digest` isn't a non-empty string of that shape. Deliberately

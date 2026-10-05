@@ -210,7 +210,10 @@ export default function Dashboard({ onPendingCountChange }) {
   );
   const mainItems = useMemo(() => visible.filter((c) => !c.pinned), [visible]);
 
-  const pendingTargets = useMemo(() => mainItems.filter(hasUpdate).map((c) => c.name), [mainItems]);
+  const pendingTargets = useMemo(
+    () => mainItems.filter(hasUpdate).map((c) => ({ name: c.name, project: c.project })),
+    [mainItems]
+  );
 
   useEffect(() => {
     if (onPendingCountChange) onPendingCountChange(pendingTargets.length);

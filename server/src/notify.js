@@ -16,11 +16,21 @@ const MAX_LISTED = 25; // keep messages from blowing past provider limits
 
 export const NOTIFY_TYPES = ['discord', 'ntfy', 'gotify', 'webhook'];
 
+// "(1.2.3 → 1.2.4)", "(current: 1.2.3)", or "" — whatever versions we know.
+function versionSuffix(i) {
+  const cur = i.currentVersion || null;
+  const avail = i.availableVersion || null;
+  if (cur && avail && cur !== avail) return ` (${cur} → ${avail})`;
+  if (cur && avail) return ` (${cur}, rebuilt)`;
+  if (avail) return ` (→ ${avail})`;
+  if (cur) return ` (current: ${cur})`;
+  return '';
+}
+
 function summaryLines(items) {
   return items.slice(0, MAX_LISTED).map((i) => {
-    const ver = i.currentVersion ? ` (current: ${i.currentVersion})` : '';
     const warn = i.breakingRisk ? '⚠️ ' : '';
-    return `• ${warn}${i.name} — ${i.image}${ver}`;
+    return `• ${warn}${i.name} — ${i.image}${versionSuffix(i)}`;
   });
 }
 
@@ -41,9 +51,8 @@ function title(items) {
 export function buildDiscordPayload(items) {
   const header = `🔔 **${title(items)}**`;
   const lines = items.slice(0, MAX_LISTED).map((i) => {
-    const ver = i.currentVersion ? ` (current: ${i.currentVersion})` : '';
     const warn = i.breakingRisk ? '⚠️ ' : '';
-    return `• ${warn}**${i.name}** — \`${i.image}\`${ver}`;
+    return `• ${warn}**${i.name}** — \`${i.image}\`${versionSuffix(i)}`;
   });
   return { content: [header, ...lines, ...moreLine(items)].join('\n') };
 }
@@ -100,12 +109,26 @@ async function postJson(url, payload, { timeoutMs = 10000 } = {}) {
   return { ok: res.ok, status: res.status };
 }
 
-async function postText(url, body, headers = {}, { timeoutMs = 10000 } = {}) {
+/**
+ * ntfy target URL carrying the title/tags as query parameters. ntfy accepts
+ * them either as headers or as `?title=&tags=`; headers can't be used here
+ * because fetch only allows Latin-1 header values and our titles contain
+ * emoji (a `Title: 🔔 …` header throws before the request is even sent).
+ * Query params are percent-encoded UTF-8, so they're always safe.
+ */
+export function buildNtfyUrl(url, { title: t, tags } = {}) {
+  const u = new URL(url.trim());
+  if (t) u.searchParams.set('title', t);
+  if (tags) u.searchParams.set('tags', tags);
+  return u.toString();
+}
+
+async function postNtfy(url, message, { timeoutMs = 10000 } = {}) {
   assertValidUrl(url);
-  const res = await fetch(url, {
+  const res = await fetch(buildNtfyUrl(url, message), {
     method: 'POST',
-    headers: { 'Content-Type': 'text/plain; charset=utf-8', ...headers },
-    body,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    body: message.body,
     signal: AbortSignal.timeout(timeoutMs),
   });
   return { ok: res.ok, status: res.status };
@@ -117,10 +140,8 @@ async function postText(url, body, headers = {}, { timeoutMs = 10000 } = {}) {
  */
 export function sendUpdates(type, url, items, opts) {
   switch (type) {
-    case 'ntfy': {
-      const m = buildNtfyMessage(items);
-      return postText(url, m.body, { Title: m.title, Tags: m.tags }, opts);
-    }
+    case 'ntfy':
+      return postNtfy(url, buildNtfyMessage(items), opts);
     case 'gotify':
       return postJson(url, buildGotifyPayload(items), opts);
     case 'webhook':
@@ -136,7 +157,9 @@ export function sendTest(type, url, opts) {
   const text = '✅ DockPull test — your notifications are configured correctly.';
   switch (type) {
     case 'ntfy':
-      return postText(url, text, { Title: 'DockPull test', Tags: 'white_check_mark' }, opts);
+      // Same emoji-bearing title style as real notifications, so a passing
+      // test really proves real notifications will get through.
+      return postNtfy(url, { title: '✅ DockPull test', tags: 'white_check_mark', body: text }, opts);
     case 'gotify':
       return postJson(url, { title: 'DockPull test', message: text, priority: 5 }, opts);
     case 'webhook':
@@ -151,6 +174,7 @@ export default {
   NOTIFY_TYPES,
   buildDiscordPayload,
   buildNtfyMessage,
+  buildNtfyUrl,
   buildGotifyPayload,
   buildWebhookPayload,
   sendUpdates,
