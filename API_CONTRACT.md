@@ -119,6 +119,19 @@ All request/response bodies are JSON unless noted otherwise.
   image (checks, updates and pins keep working, and the newer version is
   offered again).
 
+### `POST /api/update/:name/switch-tag`
+
+- Auth: cookie. Body: `{ "tag": "string" }` — must be a newer tag the last check
+  offered for this container's image (`newerTag` / `newerMajorTag`).
+- Compose-managed: rewrites that service's `image:` line (the last `-f` file that
+  sets it; `.dockpull.bak` kept), then updates as `POST /api/update/:name`. If the
+  pull/up fails before the container changed, the file is restored. Standalone:
+  pulls the new tag and recreates the container on it. The rollback point records
+  the compose edit, so a revert puts the old tag back in the file.
+- Response: `200 { "streamId": "string" }` (stream as for updates).
+- Errors: `400 invalid_tag`; `409 tag_not_offered`; `409 update_in_progress`;
+  `404 not_found`.
+
 ### `GET /api/update/:name/stream`
 
 - Auth: cookie.
@@ -253,6 +266,36 @@ separate section, but can still be updated by hand.
 - Un-skips the pending update for `ref` (URL-encoded). Same responses as
   `POST /api/skip`.
 
+### `POST /api/skip-tag`
+
+- Auth: cookie. Body: `{ "ref": "string", "tag": "string"|null }`.
+- Hides one offered newer tag until an even newer one appears (`tag: null` clears).
+- Response: `200 { "ok": true }`; `404 no_pending_update`.
+
+### `POST /api/auth/logout-all`
+
+- Auth: cookie. Invalidates every session, then sets a fresh cookie for the
+  caller so only this device stays signed in. Response: `200 { "ok": true }`.
+
+### `GET /api/self-update`
+
+- Auth: cookie. Whether a newer DockPull release exists (from GitHub releases,
+  cached 30 min). Read-only — DockPull never updates itself.
+- Response: `200 { "current": string, "available": boolean, "latest"?: string, "releaseUrl"?: string, "releases"?: [{ "tag", "url", "publishedAt", "body" }] }`.
+
+### `GET /api/backup`
+
+- Auth: cookie. Downloads `{ "format": "dockpull-backup", "version": 1, "appVersion", "exportedAt", "settings", "pinned": [ref], "history": [row] }`
+  (up to 5000 history rows). Contains the notification URL.
+
+### `POST /api/restore`
+
+- Auth: cookie. Body: a backup as above (up to 5 MB). Settings are validated
+  all-or-nothing; invalid pins/history rows are skipped; history is only imported
+  into an empty history.
+- Response: `200 { "ok": true, "settings", "pinned", "history", "skipped", "historySkippedBecauseNotEmpty" }`;
+  `400 invalid_backup`.
+
 ### `GET /api/settings`
 
 - Auth: cookie.
@@ -351,6 +394,11 @@ Field notes:
   the running and available versions mention breaking changes (best-effort,
   GitHub-sourced images only; scanned when the update event is recorded).
   `false` otherwise, including when no update is available.
+- `newerTag` — a newer version TAG in the same major version (e.g. running
+  `postgres:16.3`, registry has `16.4`), or `null`. `newerMajorTag` — the newest
+  tag of a higher major version, only when the `tagUpdates` setting is `major`.
+  Both respect a skipped tag (`POST /api/skip-tag`) and are `null` when
+  `tagUpdates` is `off`.
 - `skipped` — `true` when an update exists but the user skipped that exact
   build (`POST /api/skip`); `updateAvailable` is then `false`, while
   `availableDigest`/`availableVersion` still describe the skipped build.

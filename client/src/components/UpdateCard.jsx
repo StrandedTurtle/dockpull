@@ -258,7 +258,7 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
   const isRebuild = showUpdateAvailable && sameVersion(runningLabel, availableVersion);
 
   return (
-    <div className={`update-card${showUpdateAvailable ? ' has-update' : ''}`}>
+    <div className={`update-card${showUpdateAvailable || (!pinned && (newerTag || newerMajorTag)) ? ' has-update' : ''}`}>
       <div className="card-top">
         <div className="card-identity">
           <div className="card-name truncate" title={name}>
