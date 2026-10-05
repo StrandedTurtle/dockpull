@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1](https://github.com/StrandedTurtle/dockpull/compare/v1.7.0...v1.7.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* accurate prune sizes, shared-image and revert tracking, and security hardening ([#103](https://github.com/StrandedTurtle/dockpull/issues/103)) ([04683e4](https://github.com/StrandedTurtle/dockpull/commit/04683e4812c8a07b15cadc8c5f02c3123ac24ecc))
+* **deps:** bump @grpc/grpc-js from 1.14.4 to 1.14.5 in /server ([#102](https://github.com/StrandedTurtle/dockpull/issues/102)) ([c06a580](https://github.com/StrandedTurtle/dockpull/commit/c06a5806f5b3b32e60dcd97431d7c702af0cd31c))
+
 ## [1.7.0](https://github.com/StrandedTurtle/dockpull/compare/v1.6.3...v1.7.0) (2026-09-30)
 
 
