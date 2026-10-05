@@ -29,6 +29,19 @@ function apiHost(registry) {
 }
 
 /**
+ * Base URL for a registry's v2 API. Like Docker itself, registries on the
+ * loopback address (localhost / 127.0.0.0/8 / ::1, any port) are spoken to over
+ * plain http — that's where a local `registry:2` lives. Everything else: https.
+ */
+export function registryBaseUrl(registry) {
+  const host = apiHost(registry);
+  const bracketed = host.match(/^\[([^\]]+)\](?::\d+)?$/); // [ipv6]:port
+  const hostname = bracketed ? bracketed[1] : host.replace(/:\d+$/, '');
+  const loopback = hostname === 'localhost' || /^127\.\d+\.\d+\.\d+$/.test(hostname) || hostname === '::1';
+  return `${loopback ? 'http' : 'https'}://${host}`;
+}
+
+/**
  * Parse a `WWW-Authenticate: Bearer realm="...",service="...",scope="..."`
  * header into its parameters.
  *
@@ -49,6 +62,9 @@ export function parseWwwAuthenticate(header) {
 async function fetchToken(wwwAuth, repository, timeoutMs, basicAuth) {
   if (!wwwAuth.realm) return null;
   const url = new URL(wwwAuth.realm);
+  // Only hand stored credentials to an https token server — never send them
+  // in clear text (an anonymous token request over http is still allowed).
+  if (url.protocol !== 'https:') basicAuth = null;
   if (wwwAuth.service) url.searchParams.set('service', wwwAuth.service);
   url.searchParams.set('scope', wwwAuth.scope || `repository:${repository}:pull`);
   const res = await fetch(url, {
@@ -95,8 +111,8 @@ export async function getRemoteDigest(imageRef, { timeoutMs = 10000 } = {}) {
   const { registry, repository, tag } = parseRef(imageRef);
   if (!tag) return null; // digest-pinned; nothing to check against a tag
 
-  const host = apiHost(registry);
-  const manifestUrl = `https://${host}/v2/${repository}/manifests/${encodeURIComponent(tag)}`;
+  const base = registryBaseUrl(registry);
+  const manifestUrl = `${base}/v2/${repository}/manifests/${encodeURIComponent(tag)}`;
 
   const headManifest = (authHeader) =>
     fetch(manifestUrl, {
@@ -173,8 +189,8 @@ export async function getRemoteVersion(imageRef, { timeoutMs = 10000 } = {}) {
     const { registry, repository, tag } = parseRef(imageRef);
     if (!tag) return null;
 
-    const host = apiHost(registry);
-    const manifestUrl = `https://${host}/v2/${repository}/manifests/${encodeURIComponent(tag)}`;
+    const base = registryBaseUrl(registry);
+    const manifestUrl = `${base}/v2/${repository}/manifests/${encodeURIComponent(tag)}`;
 
     let authHeader = null;
     let res = await fetch(manifestUrl, {
@@ -198,7 +214,7 @@ export async function getRemoteVersion(imageRef, { timeoutMs = 10000 } = {}) {
     if (Array.isArray(manifest.manifests) && manifest.manifests.length > 0) {
       const picked = pickPlatformManifest(manifest.manifests);
       if (!picked?.digest) return null;
-      const subUrl = `https://${host}/v2/${repository}/manifests/${picked.digest}`;
+      const subUrl = `${base}/v2/${repository}/manifests/${picked.digest}`;
       imageManifest = await authedJson(subUrl, authHeader, timeoutMs);
       if (!imageManifest) return null;
     }
@@ -206,7 +222,7 @@ export async function getRemoteVersion(imageRef, { timeoutMs = 10000 } = {}) {
     const configDigest = imageManifest.config?.digest;
     if (!configDigest) return null;
 
-    const blobUrl = `https://${host}/v2/${repository}/blobs/${configDigest}`;
+    const blobUrl = `${base}/v2/${repository}/blobs/${configDigest}`;
     const blobRes = await fetch(blobUrl, {
       headers: { ...(authHeader ? { Authorization: authHeader } : {}) },
       signal: AbortSignal.timeout(timeoutMs),
@@ -219,4 +235,4 @@ export async function getRemoteVersion(imageRef, { timeoutMs = 10000 } = {}) {
   }
 }
 
-export default { getRemoteDigest, getRemoteVersion, parseWwwAuthenticate, pickPlatformManifest };
+export default { registryBaseUrl, getRemoteDigest, getRemoteVersion, parseWwwAuthenticate, pickPlatformManifest };

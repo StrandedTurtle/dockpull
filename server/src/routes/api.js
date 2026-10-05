@@ -29,8 +29,12 @@ import { sendTest } from '../notify.js';
 import { getChangelog } from '../changelog.js';
 import { isValidNotifyUrl } from '../urlguard.js';
 import * as db from '../db.js';
+import { validateContainerNameParam } from '../security.js';
 
 export const apiRouter = express.Router();
+
+// Every :name route talks to Docker; reject anything that isn't a container name.
+apiRouter.param('name', validateContainerNameParam);
 
 // App version, read once from package.json for the About panel / status.
 const APP_VERSION = (() => {
@@ -132,8 +136,8 @@ apiRouter.get('/api/events', (req, res) => {
 function withVersions(rows) {
   return rows.map((r) => ({
     ...r,
-    old_version: db.getImageVersion(r.old_digest),
-    new_version: db.getImageVersion(r.new_digest),
+    old_version: r.old_version ?? db.getImageVersion(r.old_digest),
+    new_version: r.new_version ?? db.getImageVersion(r.new_digest),
   }));
 }
 
@@ -203,7 +207,28 @@ apiRouter.post('/api/images/prune', async (req, res) => {
     console.error(`api.js: POST /api/images/prune failed: ${err.message}`);
     return res.status(500).json({ error: 'prune_failed' });
   }
-  return res.status(200).json({ ok: true, deleted: result.deleted, spaceReclaimed: result.spaceReclaimed });
+
+  // A pruned image may have been some container's revert point; drop those so
+  // the dashboard stops offering a Revert that would fail.
+  const revertsRemoved = db.deleteRollbackPointsForImages(result.removedIds);
+
+  // Refresh the "something to prune" status now, rather than leaving the
+  // pre-prune count in place until the next daily scan (which made the
+  // Settings badge reappear on reload).
+  try {
+    const left = await listDanglingImages();
+    db.setMeta('danglingImages', { count: left.count, totalSize: left.totalSize, checkedAt: Date.now() });
+  } catch {
+    // best-effort
+  }
+
+  if (revertsRemoved.length) broadcastGlobal({ type: 'containers-changed' });
+  return res.status(200).json({
+    ok: true,
+    deleted: result.deleted,
+    spaceReclaimed: result.spaceReclaimed,
+    revertsRemoved,
+  });
 });
 
 apiRouter.get('/api/pinned', (req, res) => {

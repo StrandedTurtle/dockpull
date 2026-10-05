@@ -37,6 +37,9 @@ const COMPOSE_PROJECT_LABEL = 'com.docker.compose.project';
 const COMPOSE_SERVICE_LABEL = 'com.docker.compose.service';
 const COMPOSE_CONFIG_FILES_LABEL = 'com.docker.compose.project.config_files';
 const COMPOSE_WORKING_DIR_LABEL = 'com.docker.compose.project.working_dir';
+// Compose records the image ID a container was created from here, and skips
+// recreating a container whose label already matches the service's image.
+const COMPOSE_IMAGE_LABEL = 'com.docker.compose.image';
 
 const COMPOSE_FILE_CANDIDATES = [
   'compose.yaml',
@@ -44,6 +47,30 @@ const COMPOSE_FILE_CANDIDATES = [
   'docker-compose.yaml',
   'docker-compose.yml',
 ];
+
+// Set on a container DockPull recreated from a previous image (revert). Docker
+// then records the bare image ID as its image, so these remember which ref it
+// tracks and which registry digest it runs — otherwise the container drops out
+// of update checks ("up to date" forever) and can't be updated or pinned.
+export const REF_LABEL = 'io.dockpull.image-ref';
+export const DIGEST_LABEL = 'io.dockpull.image-digest';
+
+const IMAGE_ID_RE = /^(sha256:)?[0-9a-f]{12,64}$/i;
+
+/**
+ * Pure: the image ref a container tracks — its configured `Config.Image`,
+ * unless that's a bare image ID left by a revert, in which case the ref
+ * remembered in REF_LABEL.
+ *
+ * @param {object} inspectData - container inspect output.
+ * @returns {string|null}
+ */
+export function trackedImageRef(inspectData) {
+  const configured = inspectData?.Config?.Image || null;
+  const remembered = inspectData?.Config?.Labels?.[REF_LABEL];
+  if (remembered && (!configured || IMAGE_ID_RE.test(configured))) return remembered;
+  return configured;
+}
 
 /**
  * Strips the leading slash Docker prefixes onto container names.
@@ -276,6 +303,25 @@ export async function getComposeInfo(nameOrContainer) {
 }
 
 /**
+ * True if `ref` exists locally and points at an image other than `imageId`.
+ * Cached per listing (many containers can share a tag).
+ */
+async function tagPointsElsewhere(ref, imageId, cache) {
+  if (!cache.has(ref)) {
+    cache.set(
+      ref,
+      docker
+        .getImage(ref)
+        .inspect()
+        .then((i) => i.Id)
+        .catch(() => null)
+    );
+  }
+  const tagId = await cache.get(ref);
+  return Boolean(tagId) && tagId !== imageId;
+}
+
+/**
  * Lists all containers (including stopped ones) with the fields needed by
  * the `/api/containers` endpoint's docker-derived data. Skips (with a
  * logged warning) any container that fails to inspect, rather than
@@ -290,6 +336,7 @@ export async function getComposeInfo(nameOrContainer) {
 export async function listContainers() {
   const summaries = await docker.listContainers({ all: true });
   const results = [];
+  const tagIdCache = new Map(); // image ref -> local image ID it points at
 
   for (const summary of summaries) {
     try {
@@ -304,18 +351,33 @@ export async function listContainers() {
         continue;
       }
 
-      const image = inspectData.Config?.Image;
+      const image = trackedImageRef(inspectData);
       if (!image) {
         console.warn(`docker.js: container ${name} has no Config.Image, skipping`);
         continue;
       }
 
-      const {
-        digest: currentDigest,
-        digests: currentDigests,
-        version: currentVersion,
-        source: sourceUrl,
-      } = await inspectImageMeta(inspectData.Image, image);
+      const meta = await inspectImageMeta(inspectData.Image, image);
+      const { version: currentVersion, source: sourceUrl } = meta;
+      let currentDigests = meta.digests;
+      // A reverted container runs an untagged image with no RepoDigests; use
+      // the digest recorded at revert time, so it's still checked (and the
+      // newer image is offered again).
+      const revertDigest = inspectData.Config?.Labels?.[DIGEST_LABEL];
+      if (currentDigests.length === 0 && revertDigest) currentDigests = [revertDigest];
+      // Still no digest: the image lost its tag (and, with the containerd image
+      // store, its RepoDigests) — e.g. a sibling container on the same tag was
+      // updated, or this one was reverted. If the tag now points at a DIFFERENT
+      // local image, this container is behind; let its image ID stand in as
+      // the digest so the check flags the newer image instead of silently
+      // treating it as up to date.
+      if (currentDigests.length === 0 && /^sha256:/.test(inspectData.Image || '')) {
+        const reverted = Boolean(inspectData.Config?.Labels?.[REF_LABEL]);
+        if (reverted || (await tagPointsElsewhere(image, inspectData.Image, tagIdCache))) {
+          currentDigests = [inspectData.Image];
+        }
+      }
+      const currentDigest = currentDigests[0] ?? null;
 
       const labels = inspectData.Config?.Labels;
       const labelInfo = composeInfoFromLabels(labels);
@@ -448,9 +510,9 @@ async function currentDigestForContainerName(name) {
     console.warn(`docker.js: failed to inspect ${name} for digest resolution: ${err.message}`);
     return null;
   }
-  const image = inspectData.Config?.Image;
+  const image = trackedImageRef(inspectData);
   if (!image) return null;
-  return resolveCurrentDigest(inspectData.Image, image);
+  return (await resolveCurrentDigest(inspectData.Image, image)) ?? inspectData.Config?.Labels?.[DIGEST_LABEL] ?? null;
 }
 
 /**
@@ -491,6 +553,7 @@ export function buildRecreateOptions(inspectData, baseImageConfig, targetImage) 
   const baseLabels = base.Labels || {};
   const labels = {};
   for (const [k, v] of Object.entries(cfg.Labels || {})) {
+    if (k === REF_LABEL || k === DIGEST_LABEL) continue; // describe the OLD image only
     if (baseLabels[k] !== v) labels[k] = v;
   }
 
@@ -628,6 +691,15 @@ async function replaceContainer(name, inspectData, createOpts, log, opts = {}) {
   }
 }
 
+/** The local image ID a container currently runs, or null. */
+async function imageIdForContainerName(name) {
+  try {
+    return (await docker.getContainer(name).inspect()).Image || null;
+  } catch {
+    return null;
+  }
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -718,8 +790,14 @@ export async function updateContainer(name, onLine) {
     };
   }
 
-  const image = inspectData.Config?.Image;
-  const oldDigest = image ? await resolveCurrentDigest(inspectData.Image, image) : null;
+  const image = trackedImageRef(inspectData);
+  // The old image's registry digest can be unknown — e.g. another container
+  // sharing the image updated first, leaving this one's image untagged with no
+  // RepoDigests. Its version label is still readable, so keep that for the
+  // revert button / history.
+  const oldMeta = image ? await inspectImageMeta(inspectData.Image, image) : null;
+  const oldDigest = oldMeta?.digest ?? inspectData.Config?.Labels?.[DIGEST_LABEL] ?? null;
+  const oldVersion = oldMeta?.version ?? null;
   // Local image ID of what's running now, so a later revert can recreate the
   // container from this exact (working) image without pulling.
   const oldImageId = inspectData.Image || null;
@@ -796,10 +874,45 @@ export async function updateContainer(name, onLine) {
       };
     }
 
+    // Safety net: Compose decides whether to recreate from its own labels, and
+    // can skip a container that isn't actually on the service's current image
+    // (e.g. one recreated outside Compose). If the container still isn't on
+    // the image the tag now points to, force the recreate rather than report
+    // a success that changed nothing.
+    try {
+      const [runningId, latestId] = await Promise.all([
+        imageIdForContainerName(name),
+        docker.getImage(image).inspect().then((i) => i.Id),
+      ]);
+      if (runningId && latestId && runningId !== latestId) {
+        onLine?.('Container is not on the pulled image yet — forcing a recreate…', 'stdout');
+        const forced = await spawnAndStream('docker', [...baseArgs, 'up', '-d', '--force-recreate', service], onLine);
+        if (forced.code !== 0) {
+          return {
+            success: false,
+            message: `docker compose up -d --force-recreate failed (exit ${forced.code}):\n${forced.tail}`,
+            oldDigest,
+            newDigest: null,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn(`docker.js: couldn't verify ${name} is on the pulled image: ${err.message}`);
+    }
+
     const newDigest = await currentDigestForContainerName(name);
+    const newImageId = await imageIdForContainerName(name);
     return withHealthCheck(
       name,
-      { success: true, message: 'Updated successfully via docker compose.', oldDigest, newDigest, oldImageId },
+      {
+        success: true,
+        message: 'Updated successfully via docker compose.',
+        oldDigest,
+        newDigest,
+        oldImageId,
+        newImageId,
+        oldVersion,
+      },
       true
     );
   }
@@ -854,6 +967,7 @@ export async function updateContainer(name, onLine) {
   }
 
   const newDigest = await currentDigestForContainerName(name);
+  const newImageId = await imageIdForContainerName(name);
   return withHealthCheck(
     name,
     {
@@ -862,6 +976,8 @@ export async function updateContainer(name, onLine) {
       oldDigest,
       newDigest,
       oldImageId,
+      newImageId,
+      oldVersion,
     },
     wasRunning
   );
@@ -880,7 +996,7 @@ export async function updateContainer(name, onLine) {
  * @param {(line: string, stream: 'stdout'|'stderr') => void} [onLine]
  * @returns {Promise<{ success: boolean, message: string, oldDigest: string|null, newDigest: string|null }>}
  */
-export async function revertContainer(name, imageId, onLine) {
+export async function revertContainer(name, imageId, onLine, { imageRef = null, digest = null } = {}) {
   const log = (line) => onLine && onLine(line, 'stdout');
   let inspectData;
   try {
@@ -895,6 +1011,17 @@ export async function revertContainer(name, imageId, onLine) {
     log(`Reverting "${name}" to the previous image…`);
     const baseImageConfig = await imageConfigOf(inspectData.Image);
     const createOpts = buildRecreateOptions(inspectData, baseImageConfig, imageId);
+    // Docker will record the bare image ID as this container's image; remember
+    // what it tracks so checks/updates/pins keep working (see REF_LABEL).
+    const ref = imageRef || trackedImageRef(inspectData);
+    if (ref) createOpts.Labels = { ...createOpts.Labels, [REF_LABEL]: ref };
+    // Keep Compose's record truthful: the copied label names the NEWER image,
+    // which would make a later `compose up` think this container is already
+    // current and never move it forward again.
+    if (createOpts.Labels?.[COMPOSE_IMAGE_LABEL]) {
+      createOpts.Labels = { ...createOpts.Labels, [COMPOSE_IMAGE_LABEL]: imageId };
+    }
+    if (digest) createOpts.Labels = { ...createOpts.Labels, [DIGEST_LABEL]: digest };
     // Revert always starts the container, even if it was stopped.
     await replaceContainer(name, inspectData, createOpts, log, { start: true });
     log('Container recreated from the previous image.');
@@ -919,7 +1046,7 @@ export async function revertContainer(name, imageId, onLine) {
  */
 export async function getContainerImageMeta(name) {
   const inspectData = await docker.getContainer(name).inspect();
-  const image = inspectData.Config?.Image || null;
+  const image = trackedImageRef(inspectData);
   if (!image) return { image: null, currentVersion: null, sourceUrl: null };
   const { version, source } = await inspectImageMeta(inspectData.Image, image);
   return { image, currentVersion: version, sourceUrl: source };
@@ -938,40 +1065,117 @@ export function shortImageId(id) {
 }
 
 /**
+ * Pure: how much disk deleting an image would actually free, best-effort.
+ *
+ * Docker's `Size` for an image is its WHOLE size — every layer, including base
+ * layers it shares with other images (the current version of the same app,
+ * other apps on the same base). Deleting an old image only frees the layers
+ * nothing else uses, so summing `Size` wildly over-reports (several GB "freed"
+ * when the real figure is a few hundred MB). `SharedSize` (requested with
+ * `shared-size=1`) is the part shared with other images; Size − SharedSize is
+ * what's unique to this one. When the daemon doesn't report SharedSize (-1 /
+ * missing) we can't tell, so fall back to Size and flag it as an upper bound.
+ *
+ * @param {{ Size?: number, SharedSize?: number }} img - /images/json entry.
+ * @returns {{ size: number, exact: boolean }}
+ */
+export function reclaimableSize(img) {
+  const size = Number.isFinite(img?.Size) ? img.Size : 0;
+  const shared = img?.SharedSize;
+  if (Number.isFinite(shared) && shared >= 0) {
+    return { size: Math.max(0, size - shared), exact: true };
+  }
+  return { size, exact: false };
+}
+
+/**
+ * Dangling images no container uses, with a correct `SharedSize`. Docker computes SharedSize only
+ * among the images in the SAME response, so asking for `dangling=true` with
+ * `shared-size` measures sharing between leftovers only — a lone leftover
+ * then looks 100% unique, even though most of it is the base layer the
+ * current image still uses. So take the dangling set from the filtered list,
+ * and their SharedSize from the unfiltered one.
+ */
+async function listDanglingRaw() {
+  const [dangling, all, containers] = await Promise.all([
+    docker.listImages({ filters: { dangling: ['true'] } }),
+    docker.listImages({ all: true, 'shared-size': true }),
+    docker.listContainers({ all: true }),
+  ]);
+  // `dangling=true` means "untagged", not "unused": an untagged image a
+  // container still runs (e.g. after a revert, or a sibling container updated
+  // first) is listed too. Docker refuses to delete those, so leave them out of
+  // the preview instead of promising space that won't be freed.
+  const inUse = new Set(containers.map((c) => c.ImageID).filter(Boolean));
+  const sharedById = new Map(all.map((img) => [img.Id, img.SharedSize]));
+  return dangling
+    .filter((img) => !inUse.has(img.Id))
+    .map((img) => ({ ...img, SharedSize: sharedById.get(img.Id) ?? img.SharedSize }));
+}
+
+/**
+ * Total bytes of image layers on disk (`docker system df`'s image layers
+ * figure), or null if unavailable. Asks for image data only: a full df also
+ * walks every volume to size it, which can take minutes on a big host.
+ * (dockerode's df() drops its options, hence the direct dial.)
+ */
+async function imageLayersSize() {
+  try {
+    const df = await new Promise((resolve, reject) => {
+      docker.modem.dial(
+        { path: '/system/df?', method: 'GET', options: { type: ['image'] }, statusCodes: { 200: true } },
+        (err, data) => (err ? reject(err) : resolve(data))
+      );
+    });
+    return Number.isFinite(df?.LayersSize) ? df.LayersSize : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * List dangling images (untagged layers no container references) without
  * deleting anything — a dry-run preview for the prune confirmation dialog,
  * so the user knows what they're about to remove before they remove it.
+ * `size` per image and `totalSize` are what removing them should actually
+ * free (see reclaimableSize); `fullSize` is Docker's whole-image figure.
  *
- * @returns {Promise<{ count: number, totalSize: number, images: Array<{ id: string, size: number, created: number }> }>}
+ * @returns {Promise<{ count: number, totalSize: number, exact: boolean, images: Array<{ id: string, size: number, fullSize: number, created: number }> }>}
  */
 export async function listDanglingImages() {
-  const images = await docker.listImages({ filters: { dangling: ['true'] } });
-  const list = images.map((img) => ({
-    id: shortImageId(img.Id),
-    size: img.Size ?? 0,
-    created: img.Created ?? null,
-  }));
+  const images = await listDanglingRaw();
+  let exact = true;
+  const list = images.map((img) => {
+    const r = reclaimableSize(img);
+    if (!r.exact) exact = false;
+    return {
+      id: shortImageId(img.Id),
+      size: r.size,
+      fullSize: img.Size ?? 0,
+      created: img.Created ?? null,
+    };
+  });
   return {
     count: list.length,
     totalSize: list.reduce((sum, img) => sum + img.size, 0),
+    exact,
     images: list,
   };
 }
 
 /**
- * Remove dangling images (untagged layers no container references) —
- * the leftovers that accumulate after image updates. Safe: never touches
- * tagged images or anything in use.
+ * Remove every dangling image (untagged layers no container references) — the
+ * leftovers that accumulate after image updates. Safe: never touches tagged
+ * images or anything in use. Goes through removeDanglingImages so the count is
+ * images (Docker's prune response also lists untag/layer entries) and the
+ * space figure is measured (Docker's own SpaceReclaimed under-reports with the
+ * containerd image store).
  *
- * @returns {Promise<{ deleted: number, spaceReclaimed: number }>}
+ * @returns {Promise<{ deleted: number, spaceReclaimed: number, removedIds: string[] }>}
  */
 export async function pruneDanglingImages() {
-  // dockerode serializes the filters object into the API's JSON filter param.
-  const result = await docker.pruneImages({ filters: { dangling: ['true'] } });
-  return {
-    deleted: result.ImagesDeleted?.length ?? 0,
-    spaceReclaimed: result.SpaceReclaimed ?? 0,
-  };
+  const { images } = await listDanglingImages();
+  return removeDanglingImages(images.map((img) => img.id));
 }
 
 /**
@@ -983,27 +1187,49 @@ export async function pruneDanglingImages() {
  * Removals are best-effort per image: one failure is logged and doesn't abort
  * the rest.
  *
+ * `spaceReclaimed` is MEASURED: image-layer disk usage before minus after. If
+ * the daemon can't report that, it falls back to the per-image reclaimable
+ * estimate (never the inflated whole-image sizes).
+ *
  * @param {string[]} ids - short (12-char) image IDs to remove.
- * @returns {Promise<{ deleted: number, spaceReclaimed: number }>}
+ * @returns {Promise<{ deleted: number, spaceReclaimed: number, removedIds: string[] }>}
  */
 export async function removeDanglingImages(ids) {
   const wanted = new Set((ids || []).map(shortImageId));
-  if (wanted.size === 0) return { deleted: 0, spaceReclaimed: 0 };
+  if (wanted.size === 0) return { deleted: 0, spaceReclaimed: 0, removedIds: [] };
 
-  const images = await docker.listImages({ filters: { dangling: ['true'] } });
-  let deleted = 0;
-  let spaceReclaimed = 0;
+  const images = await listDanglingRaw();
+  const before = await imageLayersSize();
+  const removedIds = [];
+  let estimate = 0;
   for (const img of images) {
-    if (!wanted.has(shortImageId(img.Id))) continue;
+    const id = shortImageId(img.Id);
+    if (!wanted.has(id)) continue;
     try {
       await docker.getImage(img.Id).remove();
-      deleted += 1;
-      spaceReclaimed += img.Size ?? 0;
+      removedIds.push(id);
+      estimate += reclaimableSize(img).size;
     } catch (err) {
-      console.warn(`docker.js: failed to remove image ${shortImageId(img.Id)}: ${err.message}`);
+      console.warn(`docker.js: failed to remove image ${id}: ${err.message}`);
     }
   }
-  return { deleted, spaceReclaimed };
+  let spaceReclaimed = estimate;
+  if (removedIds.length && before !== null) {
+    const after = await imageLayersSize();
+    if (after !== null) spaceReclaimed = Math.max(0, before - after);
+  }
+  return { deleted: removedIds.length, spaceReclaimed, removedIds };
+}
+
+/** True if an image (by ID or ref) still exists locally. */
+export async function imageExists(idOrRef) {
+  try {
+    await docker.getImage(idOrRef).inspect();
+    return true;
+  } catch (err) {
+    if (err.statusCode === 404) return false;
+    throw err;
+  }
 }
 
 export { docker };

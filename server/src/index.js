@@ -9,7 +9,7 @@ import db from './db.js';
 import { authRouter, requireAuth } from './auth.js';
 import { apiRouter } from './routes/api.js';
 import { updateRouter } from './routes/update.js';
-import { securityHeaders } from './security.js';
+import { securityHeaders, requireCsrfHeader } from './security.js';
 import scheduler from './scheduler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -49,6 +49,8 @@ app.use(securityHeaders({ https: config.BASE_URL.startsWith('https') }));
 
 app.use(express.json());
 app.use(cookieParser(config.SESSION_SECRET));
+// Before every router (login included): unsafe /api methods need X-DockPull.
+app.use(requireCsrfHeader);
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });

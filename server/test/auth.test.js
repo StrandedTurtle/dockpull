@@ -1,6 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { isValidSession, requireAuth } from '../src/auth.js';
+import { isValidSession, requireAuth, sessionCookieValue } from '../src/auth.js';
+import { config } from '../src/config.js';
 
 function makeReq({ signedCookies = {}, path = '/api/containers' } = {}) {
   return { signedCookies, path };
@@ -16,7 +17,7 @@ describe('isValidSession', () => {
   });
 
   test('returns false when the expiry is in the past', () => {
-    const expired = String(Date.now() - 1000);
+    const expired = sessionCookieValue(Date.now() - 1000);
     assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: expired } })), false);
   });
 
@@ -24,8 +25,25 @@ describe('isValidSession', () => {
     assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: 'not-a-number' } })), false);
   });
 
+  test('returns false for a legacy expiry-only cookie', () => {
+    const legacy = String(Date.now() + 1000 * 60);
+    assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: legacy } })), false);
+  });
+
+  test('changing ADMIN_PASSWORD invalidates existing sessions', () => {
+    const before = config.ADMIN_PASSWORD;
+    const cookie = sessionCookieValue(Date.now() + 60_000);
+    try {
+      config.ADMIN_PASSWORD = `${before}-changed`;
+      assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: cookie } })), false);
+    } finally {
+      config.ADMIN_PASSWORD = before;
+    }
+    assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: cookie } })), true);
+  });
+
   test('returns true when the expiry is in the future', () => {
-    const future = String(Date.now() + 1000 * 60);
+    const future = sessionCookieValue(Date.now() + 1000 * 60);
     assert.equal(isValidSession(makeReq({ signedCookies: { dockpull_session: future } })), true);
   });
 });
@@ -65,7 +83,7 @@ describe('requireAuth', () => {
   });
 
   test('calls next() for /api/ requests with a valid session', () => {
-    const future = String(Date.now() + 1000 * 60);
+    const future = sessionCookieValue(Date.now() + 1000 * 60);
     const req = makeReq({ signedCookies: { dockpull_session: future }, path: '/api/containers' });
     const res = { status: () => { throw new Error('should not respond'); } };
     let nextCalled = false;

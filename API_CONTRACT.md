@@ -16,6 +16,14 @@ All request/response bodies are JSON unless noted otherwise.
   require a valid `dockpull_session` cookie. If it is missing, invalid, or
   expired, the server responds `401 Unauthorized` with
   `{ "error": "unauthorized" }`.
+- The cookie is bound to the current `ADMIN_PASSWORD`: changing the password
+  signs out every existing session.
+- **CSRF:** every state-changing `/api/*` request (anything but
+  GET/HEAD/OPTIONS — login included) must send the header `X-DockPull: 1`, or
+  it's rejected with `403 { "error": "csrf_header_missing" }`.
+- Routes with a `:name` param reject anything that isn't a valid container
+  name with `400 { "error": "invalid_container_name" }`.
+- Error bodies may include a human-readable `message` alongside `error`.
 
 ## Endpoints
 
@@ -103,7 +111,13 @@ All request/response bodies are JSON unless noted otherwise.
   update; subscribe via `GET /api/update/:name/stream`.
 - Response: `200 { "streamId": "string" }`.
 - Errors: `404 no_rollback` if there's nothing to revert to; `404 not_found`
-  if no such container; `409` if an update/revert is already in progress.
+  if no such container; `409` if an update/revert is already in progress;
+  `410 rollback_image_gone` if the saved image no longer exists (e.g. it was
+  pruned) — the rollback point is dropped and the container is not touched.
+- The recreated container runs a bare image ID, so DockPull labels it with
+  `io.dockpull.image-ref` / `io.dockpull.image-digest` to keep tracking its
+  image (checks, updates and pins keep working, and the newer version is
+  offered again).
 
 ### `GET /api/update/:name/stream`
 
@@ -159,12 +173,16 @@ All request/response bodies are JSON unless noted otherwise.
 
 - Auth: cookie.
 - Dry-run preview of what `POST /api/images/prune` would remove — lists
-  dangling images (untagged layers no container references) without
-  deleting anything, for a confirmation dialog to summarize before the user
-  commits to pruning.
+  dangling images (untagged images no container — running or stopped — uses)
+  without deleting anything, for a confirmation dialog to summarize before
+  the user commits to pruning.
 - Response: `200` —
-  `{ "count": number, "totalSize": number, "images": [{ "id": string, "size": number, "created": number|null, "fromContainer": string|null }] }`
-  where `totalSize` is in bytes, `id` is a short (12-char) image ID, and
+  `{ "count": number, "totalSize": number, "exact": boolean, "images": [{ "id": string, "size": number, "fullSize": number, "created": number|null, "fromContainer": string|null }] }`
+  where `size` is what removing that image should free — its whole size
+  (`fullSize`) minus the layers it shares with other images, which stay —
+  and `totalSize` is their sum, in bytes (`exact: false` when the daemon
+  didn't report shared sizes, so `size` falls back to the whole image). `id`
+  is a short (12-char) image ID, and
   `fromContainer` is the name of the container this image was replaced on
   (via its remembered rollback point), or `null` when that's unknown —
   images left over from before the container's most recent update, or
@@ -184,9 +202,13 @@ All request/response bodies are JSON unless noted otherwise.
   layers); each ID is re-checked against the current dangling set before
   removal, so a stale or non-dangling ID is silently skipped. With no body
   (or no `ids`), every dangling layer is pruned.
-- Response: `200` — `{ "ok": true, "deleted": number, "spaceReclaimed": number }`
-  where `deleted` is the number of image layers removed and `spaceReclaimed`
-  is in bytes.
+- Response: `200` —
+  `{ "ok": true, "deleted": number, "spaceReclaimed": number, "revertsRemoved": [string] }`
+  where `deleted` is the number of images removed, `spaceReclaimed` is the
+  bytes actually freed — measured as image-layer disk usage before minus
+  after (falls back to the per-image estimate if the daemon can't report it)
+  — and `revertsRemoved` names containers whose revert point was among the
+  removed images (their rollback points are dropped).
 - `503 { "error": "docker_unavailable" }` when the Docker daemon is
   unreachable.
 
