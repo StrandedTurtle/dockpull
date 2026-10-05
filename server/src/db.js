@@ -83,6 +83,14 @@ CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC
   }
 }
 
+// update_history: remember versions on the row itself, for when an image's
+// digest is unknown (so the digest→version lookup can't recover them later).
+{
+  const cols = db.prepare('PRAGMA table_info(update_history)').all().map((col) => col.name);
+  if (!cols.includes('old_version')) db.exec('ALTER TABLE update_history ADD COLUMN old_version TEXT');
+  if (!cols.includes('new_version')) db.exec('ALTER TABLE update_history ADD COLUMN new_version TEXT');
+}
+
 const stmts = {
   recordEvent: db.prepare(`
     INSERT INTO update_events (image, normalized_ref, status, digest, available_version, breaking, raw_json)
@@ -144,8 +152,8 @@ const stmts = {
     DELETE FROM rollback_points WHERE container_name = ?
   `),
   recordUpdate: db.prepare(`
-    INSERT INTO update_history (container_name, image, old_digest, new_digest, status, message)
-    VALUES (@container_name, @image, @old_digest, @new_digest, @status, @message)
+    INSERT INTO update_history (container_name, image, old_digest, new_digest, old_version, new_version, status, message)
+    VALUES (@container_name, @image, @old_digest, @new_digest, @old_version, @new_version, @status, @message)
   `),
   getHistoryAll: db.prepare(`
     SELECT * FROM update_history
@@ -274,6 +282,22 @@ export function deleteRollbackPoint(container_name) {
 }
 
 /**
+ * Forget rollback points whose saved image is gone (e.g. it was pruned), so the
+ * dashboard stops offering a Revert that can't work. `shortIds` are 12-char
+ * image IDs. Returns the affected container names.
+ */
+export function deleteRollbackPointsForImages(shortIds) {
+  const gone = new Set(shortIds || []);
+  if (gone.size === 0) return [];
+  const affected = stmts.getAllRollbackPoints
+    .all()
+    .filter((r) => gone.has(String(r.image_id || '').replace(/^sha256:/, '').slice(0, 12)))
+    .map((r) => r.container_name);
+  for (const name of affected) stmts.deleteRollbackPoint.run(name);
+  return affected;
+}
+
+/**
  * Every container's remembered previous image ID (container_name, image_id
  * pairs only) — used to attribute a dangling image back to the container it
  * was replaced on, for the prune preview. One row per container (the most
@@ -283,12 +307,14 @@ export function getAllRollbackPoints() {
   return stmts.getAllRollbackPoints.all();
 }
 
-export function recordUpdate({ container_name, image, old_digest, new_digest, status, message }) {
+export function recordUpdate({ container_name, image, old_digest, new_digest, old_version, new_version, status, message }) {
   return stmts.recordUpdate.run({
     container_name,
     image,
     old_digest: old_digest ?? null,
     new_digest: new_digest ?? null,
+    old_version: old_version ?? null,
+    new_version: new_version ?? null,
     status,
     message: message ?? null,
   });

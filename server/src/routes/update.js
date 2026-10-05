@@ -14,12 +14,16 @@
  */
 
 import express from 'express';
-import { docker, updateContainer, revertContainer } from '../docker.js';
+import { docker, updateContainer, revertContainer, imageExists, trackedImageRef } from '../docker.js';
 import { normalizeRef } from '../reconcile.js';
 import * as sse from '../sse.js';
 import * as db from '../db.js';
+import { validateContainerNameParam } from '../security.js';
 
 export const updateRouter = express.Router();
+
+// Every :name route talks to Docker; reject anything that isn't a container name.
+updateRouter.param('name', validateContainerNameParam);
 
 /**
  * Runs the update + records history + finishes the SSE session, detached
@@ -32,11 +36,14 @@ export const updateRouter = express.Router();
 async function runUpdate(name, image) {
   try {
     const result = await updateContainer(name, (line, stream) => sse.pushLog(name, line, stream));
+    const oldVersion = db.getImageVersion(result.oldDigest) ?? result.oldVersion ?? null;
     db.recordUpdate({
       container_name: name,
       image,
       old_digest: result.oldDigest,
       new_digest: result.newDigest,
+      old_version: oldVersion,
+      new_version: db.getImageVersion(result.newDigest),
       status: result.success ? 'success' : 'failure',
       message: result.message,
     });
@@ -56,13 +63,15 @@ async function runUpdate(name, image) {
     // Remember how to undo this update (the previous local image) whenever the
     // image actually changed — even on a health-downgraded "failure", so the
     // user can revert a broken update.
-    if (result.oldImageId && result.newDigest && result.oldDigest && result.newDigest !== result.oldDigest) {
+    // Compare local image IDs, not registry digests: the old image's digest
+    // may be unknown (untagged by an earlier update of a sibling container).
+    if (result.oldImageId && result.newImageId && result.oldImageId !== result.newImageId) {
       db.setRollbackPoint({
         container_name: name,
         image_id: result.oldImageId,
         image_ref: image,
         old_digest: result.oldDigest,
-        old_version: db.getImageVersion(result.oldDigest),
+        old_version: oldVersion,
       });
     }
     sse.finish(name, { success: result.success, message: result.message });
@@ -104,7 +113,7 @@ updateRouter.post('/api/update/:name', async (req, res) => {
 
   sse.startSession(name);
 
-  const image = inspectData.Config?.Image ?? null;
+  const image = trackedImageRef(inspectData);
   // Fire-and-forget: don't await, so the POST returns promptly. runUpdate
   // catches its own errors, so this can never reject/crash the process.
   void runUpdate(name, image);
@@ -116,14 +125,19 @@ updateRouter.post('/api/update/:name', async (req, res) => {
  * Detached revert: recreate the container from its remembered previous image,
  * record history, and finish the SSE session. Mirrors runUpdate.
  */
-async function runRevert(name, image, imageId) {
+async function runRevert(name, image, rollback) {
   try {
-    const result = await revertContainer(name, imageId, (line, stream) => sse.pushLog(name, line, stream));
+    const result = await revertContainer(name, rollback.image_id, (line, stream) => sse.pushLog(name, line, stream), {
+      imageRef: image,
+      digest: rollback.old_digest,
+    });
     db.recordUpdate({
       container_name: name,
       image,
       old_digest: result.oldDigest,
       new_digest: result.newDigest,
+      old_version: db.getImageVersion(result.oldDigest),
+      new_version: rollback.old_version ?? null,
       status: result.success ? 'success' : 'failure',
       message: result.message,
     });
@@ -170,9 +184,24 @@ updateRouter.post('/api/update/:name/revert', async (req, res) => {
     return res.status(409).json({ error: 'update_in_progress' });
   }
 
+  // The saved image can disappear (pruned, or removed by hand). Check before
+  // touching the container, and forget the dead rollback point.
+  try {
+    if (!(await imageExists(rollback.image_id))) {
+      db.deleteRollbackPoint(name);
+      sse.broadcastGlobal({ type: 'containers-changed' });
+      return res.status(410).json({
+        error: 'rollback_image_gone',
+        message: 'The previous image no longer exists (it may have been pruned), so this update can no longer be reverted.',
+      });
+    }
+  } catch {
+    return res.status(503).json({ error: 'docker_unavailable' });
+  }
+
   sse.startSession(name);
-  const image = inspectData.Config?.Image ?? rollback.image_ref ?? null;
-  void runRevert(name, image, rollback.image_id);
+  const image = rollback.image_ref ?? trackedImageRef(inspectData);
+  void runRevert(name, image, rollback);
 
   return res.status(200).json({ streamId: name });
 });
