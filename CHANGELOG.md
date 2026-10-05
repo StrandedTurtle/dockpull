@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.2](https://github.com/StrandedTurtle/dockpull/compare/v1.7.1...v1.7.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* **deps:** bump brace-expansion in /client ([#101](https://github.com/StrandedTurtle/dockpull/issues/101)) ([d595815](https://github.com/StrandedTurtle/dockpull/commit/d59581507b9e606badf2a55bb17d48e5fe23d917))
+* **deps:** bump dotenv from 17.4.2 to 18.0.4 in /server ([#98](https://github.com/StrandedTurtle/dockpull/issues/98)) ([334488a](https://github.com/StrandedTurtle/dockpull/commit/334488ad633a557dbf0ee21b349ef2b4cb0d6bce))
+
 ## [1.7.1](https://github.com/StrandedTurtle/dockpull/compare/v1.7.0...v1.7.1) (2026-10-05)
 
 
