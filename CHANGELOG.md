@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.3](https://github.com/StrandedTurtle/dockpull/compare/v1.7.2...v1.7.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* **deps:** bump the client-minor-patch group across 1 directory with 4 updates ([#97](https://github.com/StrandedTurtle/dockpull/issues/97)) ([b5a42f3](https://github.com/StrandedTurtle/dockpull/commit/b5a42f31b57c2deebfd449bcd416ea69e538dea3))
+
 ## [1.7.2](https://github.com/StrandedTurtle/dockpull/compare/v1.7.1...v1.7.2) (2026-10-05)
 
 
