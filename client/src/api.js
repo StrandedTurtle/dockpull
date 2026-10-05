@@ -95,6 +95,11 @@ export function logout() {
   return post('/auth/logout');
 }
 
+// Sign out every other session (this one gets a fresh cookie).
+export function logoutAll() {
+  return post('/auth/logout-all');
+}
+
 // --- Containers / updates ---
 
 export function getContainers() {
@@ -172,6 +177,27 @@ export function skipUpdate(ref) {
 
 export function unskipUpdate(ref) {
   return del(`/skip/${encodeURIComponent(ref)}`);
+}
+
+// Move a container to a newer version tag the last check found.
+export function switchTag(name, tag) {
+  return post(`/update/${encodeURIComponent(name)}/switch-tag`, { tag });
+}
+
+// Hide an offered newer tag until an even newer one appears (tag null clears).
+export function skipTag(ref, tag) {
+  return post('/skip-tag', { ref, tag });
+}
+
+// --- Backup / restore --- (download is a plain link to `${API_BASE}/backup`)
+
+export function restoreBackup(backup) {
+  return post('/restore', backup);
+}
+
+// Is a newer DockPull out? { current, available, latest?, releaseUrl?, releases? }
+export function getSelfUpdate() {
+  return get('/self-update');
 }
 
 // --- Settings ---

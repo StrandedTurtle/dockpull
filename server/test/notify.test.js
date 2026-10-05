@@ -98,3 +98,36 @@ test('sendUpdates/sendTest (ntfy): emoji titles are delivered, not thrown', asyn
     server.close();
   }
 });
+
+import { buildFailureMessage, sendFailure } from '../src/notify.js';
+
+test('buildFailureMessage: names the container and trims long output', () => {
+  const m = buildFailureMessage({ name: 'db', image: 'postgres:16', message: Array(20).fill('line').join('\n') });
+  assert.match(m.title, /Update of db failed/);
+  assert.equal(m.body.split('\n').length, 7); // image + 6 lines
+  assert.match(buildFailureMessage({ name: 'x', action: 'revert' }).title, /Revert of x failed/);
+});
+
+test('sendFailure: every target type delivers (ntfy emoji title via query)', async () => {
+  const got = [];
+  const server = http.createServer((req, res) => {
+    let b = '';
+    req.on('data', (c) => (b += c));
+    req.on('end', () => {
+      got.push({ url: req.url, body: b });
+      res.end('ok');
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}/x`;
+  try {
+    for (const type of ['discord', 'ntfy', 'gotify', 'webhook']) {
+      const r = await sendFailure(type, url, { name: 'db', image: 'postgres:16', message: 'boom' });
+      assert.equal(r.ok, true, type);
+    }
+    assert.match(new URL(got[1].url, 'http://x').searchParams.get('title'), /Update of db failed/);
+    assert.match(got[0].body, /boom/);
+  } finally {
+    server.close();
+  }
+});

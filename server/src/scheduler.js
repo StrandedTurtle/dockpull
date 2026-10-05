@@ -20,6 +20,7 @@ import * as db from './db.js';
 
 let timer = null;
 let running = false;
+let nextRunAt = null;
 
 /**
  * Milliseconds until the next occurrence of a daily HH:MM (server local time).
@@ -33,6 +34,40 @@ export function msUntilNext(timeStr, now = new Date()) {
   const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
   if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
   return next.getTime() - now.getTime();
+}
+
+const STARTUP_CATCHUP_DELAY_MS = 60_000; // let the app settle before a catch-up scan
+
+/** The most recent daily HH:MM at or before `now` (server local time). */
+function previousOccurrence(timeStr, now) {
+  return new Date(now.getTime() + msUntilNext(timeStr, now) - 24 * 3600 * 1000);
+}
+
+/**
+ * Pure: milliseconds until the next background scan.
+ *
+ * - `daily`: at scheduledCheckTime. On startup, if that time passed since the
+ *   last check (the server was off or restarting then), catch up shortly
+ *   instead of waiting up to a day.
+ * - `interval`: every scheduleIntervalHours, counted from the last check
+ *   (manual ones included, so a fresh manual check pushes it back). Overdue or
+ *   never-checked runs shortly.
+ *
+ * @param {{ scheduleMode: string, scheduledCheckTime: string, scheduleIntervalHours: number }} settings
+ * @param {{ lastCheckAt?: number|null, now?: Date, startup?: boolean }} [opts]
+ * @returns {number}
+ */
+export function planNextRun(settings, { lastCheckAt = null, now = new Date(), startup = false } = {}) {
+  if (settings.scheduleMode === 'interval') {
+    const every = Math.max(1, settings.scheduleIntervalHours || 6) * 3600 * 1000;
+    if (!lastCheckAt) return STARTUP_CATCHUP_DELAY_MS;
+    return Math.max(STARTUP_CATCHUP_DELAY_MS, lastCheckAt + every - now.getTime());
+  }
+  if (startup) {
+    const due = previousOccurrence(settings.scheduledCheckTime, now).getTime();
+    if (!lastCheckAt || lastCheckAt < due) return STARTUP_CATCHUP_DELAY_MS;
+  }
+  return msUntilNext(settings.scheduledCheckTime, now);
 }
 
 /**
@@ -129,25 +164,41 @@ async function tick() {
 
 async function fire() {
   await tick();
-  reschedule(); // arm for the next day
+  reschedule(); // arm the next run
+}
+
+function lastCheckAt() {
+  try {
+    return db.getMeta('lastCheck')?.at ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
- * (Re)arm the daily timer from current settings. Clears any existing timer
- * first; no-op when background checks are disabled.
+ * (Re)arm the background timer from current settings. Clears any existing
+ * timer first; no-op when background checks are disabled.
  */
-export function reschedule() {
+export function reschedule({ startup = false } = {}) {
   if (timer) {
     clearTimeout(timer);
     timer = null;
   }
   const s = getSettings();
   if (!s.backgroundCheckEnabled) return;
-  timer = setTimeout(fire, msUntilNext(s.scheduledCheckTime));
+  const delay = planNextRun(s, { lastCheckAt: lastCheckAt(), startup });
+  timer = setTimeout(fire, delay);
+  timer.unref?.();
+  nextRunAt = Date.now() + delay;
+}
+
+/** When the next background scan is due (ms epoch), or null if none. */
+export function getNextRunAt() {
+  return timer ? nextRunAt : null;
 }
 
 export function start() {
-  reschedule();
+  reschedule({ startup: true });
 }
 
 export function stop() {
@@ -157,4 +208,4 @@ export function stop() {
   }
 }
 
-export default { start, stop, reschedule, runScheduledCheck, msUntilNext, selectNotifyTargets };
+export default { start, stop, reschedule, runScheduledCheck, msUntilNext, planNextRun, getNextRunAt, selectNotifyTargets };

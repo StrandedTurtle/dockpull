@@ -38,6 +38,8 @@ export function buildContainerItems({
   lookupVersion = () => null,
   getRollback = () => null,
   getCheckError = () => null,
+  getTagUpdate = () => null,
+  tagPolicy = 'minor',
 }) {
   const items = [];
   const refsToResolve = [];
@@ -82,6 +84,13 @@ export function buildContainerItems({
 
     const rollback = getRollback(c.name);
 
+    // Newer version tags (postgres:16.3 -> 16.4 / 17.1), minus a skipped one
+    // and filtered by the "tag updates" setting.
+    const tagRow = tagPolicy === 'off' ? null : getTagUpdate(c.normalizedRef);
+    const visibleTag = (t) => (t && t !== tagRow?.dismissed_tag ? t : null);
+    const newerTag = visibleTag(tagRow?.same_major);
+    const newerMajorTag = tagPolicy === 'major' ? visibleTag(tagRow?.next_major) : null;
+
     items.push({
       name: c.name,
       project: c.project,
@@ -98,6 +107,8 @@ export function buildContainerItems({
       // must not leak through once the digests match again.
       breakingRisk: !!(updateAvailable && event?.breaking),
       skipped,
+      newerTag,
+      newerMajorTag,
       pinned: isPinned(c.normalizedRef),
       canRevert: !!rollback,
       rollbackVersion: rollback?.old_version ?? null,

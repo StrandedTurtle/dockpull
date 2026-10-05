@@ -159,6 +159,8 @@ describe('buildContainerItems', () => {
       availableVersion: null,
       breakingRisk: false,
       skipped: false,
+      newerTag: null,
+      newerMajorTag: null,
       pinned: false,
       canRevert: false,
       rollbackVersion: null,
@@ -237,5 +239,27 @@ describe('buildContainerItems: image known under several repo digests', () => {
       isPinned: () => false,
     });
     assert.equal(items[0].updateAvailable, true);
+  });
+});
+
+describe('buildContainerItems: newer version tags', () => {
+  const row = { same_major: '1.3.0', next_major: '2.0.0', dismissed_tag: null };
+  const build = (opts) =>
+    buildContainerItems({ containers: [makeContainer()], lookupEvent: () => undefined, isPinned: () => false, ...opts }).items[0];
+
+  test('minor policy shows only the same-major tag; major shows both; off shows none', () => {
+    assert.deepEqual(
+      [build({ getTagUpdate: () => row }).newerTag, build({ getTagUpdate: () => row }).newerMajorTag],
+      ['1.3.0', null]
+    );
+    const major = build({ getTagUpdate: () => row, tagPolicy: 'major' });
+    assert.deepEqual([major.newerTag, major.newerMajorTag], ['1.3.0', '2.0.0']);
+    const off = build({ getTagUpdate: () => row, tagPolicy: 'off' });
+    assert.deepEqual([off.newerTag, off.newerMajorTag], [null, null]);
+  });
+
+  test('a skipped tag stays hidden', () => {
+    const item = build({ getTagUpdate: () => ({ ...row, dismissed_tag: '1.3.0' }), tagPolicy: 'major' });
+    assert.deepEqual([item.newerTag, item.newerMajorTag], [null, '2.0.0']);
   });
 });

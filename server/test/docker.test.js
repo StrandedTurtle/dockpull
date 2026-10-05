@@ -151,3 +151,25 @@ test('buildRecreateOptions: revert labels never carry over to the next container
   );
   assert.deepEqual(o.Labels, { 'my.label': 'x' });
 });
+
+import { healthWaitPlan } from '../src/docker.js';
+
+test('healthWaitPlan: no healthcheck -> must stay up a few seconds', () => {
+  for (const hc of [undefined, null, {}, { Test: ['NONE'] }]) {
+    const p = healthWaitPlan(hc);
+    assert.equal(p.hasHealthcheck, false);
+    assert.ok(p.stableMs >= 5000);
+  }
+});
+
+test('healthWaitPlan: waits as long as the container\'s own healthcheck needs', () => {
+  const s = 1e9; // ns per second
+  const slow = healthWaitPlan({ Test: ['CMD', 'true'], Interval: 10 * s, Timeout: 5 * s, Retries: 5, StartPeriod: 120 * s });
+  // start_period 120s + (10s + 5s) * 6 probes + 10s slack = 220s
+  assert.equal(slow.timeoutMs, 220_000);
+  // Docker defaults (interval/timeout 30s, retries 3) -> 250s
+  assert.equal(healthWaitPlan({ Test: ['CMD-SHELL', 'curl -f localhost'] }).timeoutMs, 250_000);
+  // Capped at 15 minutes, floored at 30s.
+  assert.equal(healthWaitPlan({ Test: ['CMD', 'x'], StartPeriod: 3600 * s }).timeoutMs, 900_000);
+  assert.equal(healthWaitPlan({ Test: ['CMD', 'x'], Interval: 1 * s, Timeout: 1 * s, Retries: 1 }).timeoutMs, 30_000);
+});

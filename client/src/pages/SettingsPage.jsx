@@ -9,6 +9,9 @@ import {
   getStatus,
   getDanglingImages,
   pruneImages,
+  logoutAll,
+  restoreBackup,
+  API_BASE,
 } from '../api.js';
 import ConfirmDialog from '../components/ConfirmDialog.jsx';
 import { useTheme } from '../hooks/useTheme.js';
@@ -24,6 +27,19 @@ function formatBytes(n) {
     i += 1;
   } while (value >= 1024 && i < units.length - 1);
   return `${value.toFixed(1)} ${units[i]}`;
+}
+
+// "in 3h", "in 25m", "at 09:00 tomorrow"-ish relative time for a future epoch ms.
+function formatWhen(ts) {
+  const ms = ts - Date.now();
+  if (!Number.isFinite(ms)) return '';
+  if (ms < 60_000) return 'in under a minute';
+  const m = Math.round(ms / 60_000);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  if (h < 24) return `in ${h}h${rest ? ` ${rest}m` : ''}`;
+  return `on ${new Date(ts).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`;
 }
 
 // Rough relative age for an image's creation time (Docker's `created` is Unix
@@ -87,10 +103,12 @@ export default function SettingsPage({ onPruneComplete } = {}) {
   const [pruning, setPruning] = useState(false);
   const [pruneStatus, setPruneStatus] = useState('');
   const [pruneSummaryLoading, setPruneSummaryLoading] = useState(false);
-  // The dangling images still selected for pruning. Starts as the full fetched
-  // list; the user can drop rows (which then just reappear next time, since
-  // they're never removed). Drives both the table and what gets pruned.
-  const [pruneSelection, setPruneSelection] = useState([]);
+  // Every prunable image from the preview, and the IDs the user has left out.
+  // Revert points (images named after a container) start excluded: pruning
+  // one removes that container's undo button, so it's opt-in.
+  const [pruneCandidates, setPruneCandidates] = useState([]);
+  const [pruneExcluded, setPruneExcluded] = useState(() => new Set());
+  const pruneSelection = pruneCandidates.filter((img) => !pruneExcluded.has(img.id));
 
   const [health, setHealth] = useState(null); // null = unknown, true/false once checked
   const [status, setStatus] = useState(null); // { version, serverLocalTime, timeZone }
@@ -130,11 +148,72 @@ export default function SettingsPage({ onPruneComplete } = {}) {
       .catch(() => setHealth(false));
   }, []);
 
-  useEffect(() => {
+  const refreshStatus = useCallback(() => {
     getStatus()
       .then((s) => setStatus(s || null))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    refreshStatus();
+  }, [refreshStatus]);
+
+  // --- Account & data ---
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountStatus, setAccountStatus] = useState('');
+  const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
+  const [pendingRestore, setPendingRestore] = useState(null);
+
+  const handleLogoutAll = useCallback(async () => {
+    setConfirmLogoutAll(false);
+    setAccountBusy(true);
+    setAccountStatus('');
+    try {
+      await logoutAll();
+      setAccountStatus('Signed out everywhere else. This device stays signed in.');
+    } catch (err) {
+      setAccountStatus(err.message || 'Failed to sign out other sessions');
+    } finally {
+      setAccountBusy(false);
+    }
+  }, []);
+
+  const handleRestoreFile = useCallback(async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow picking the same file again
+    if (!file) return;
+    setAccountStatus('');
+    try {
+      const data = JSON.parse(await file.text());
+      if (data?.format !== 'dockpull-backup') throw new Error("That file isn't a DockPull backup.");
+      setPendingRestore(data);
+    } catch (err) {
+      setAccountStatus(err instanceof SyntaxError ? "That file isn't valid JSON." : err.message);
+    }
+  }, []);
+
+  const handleRestoreConfirm = useCallback(async () => {
+    const backup = pendingRestore;
+    setPendingRestore(null);
+    setAccountBusy(true);
+    try {
+      const r = await restoreBackup(backup);
+      setAccountStatus(
+        `Restored ${r.settings} settings, ${r.pinned} pinned, ${r.history} history entries` +
+          (r.historySkippedBecauseNotEmpty ? ' (history kept as is — it already had entries)' : '') +
+          (r.skipped ? `; skipped ${r.skipped} invalid entr${r.skipped === 1 ? 'y' : 'ies'}` : '') +
+          '.'
+      );
+      const fresh = await getSettings();
+      setSettings(fresh);
+      setWebhookDraft(fresh?.discordWebhookUrl || '');
+      refreshStatus();
+    } catch (err) {
+      setAccountStatus(err.message || 'Restore failed');
+    } finally {
+      setAccountBusy(false);
+    }
+  }, [pendingRestore, refreshStatus]);
 
   const saveSetting = useCallback(async (patch) => {
     setSettings((prev) => ({ ...prev, ...patch })); // optimistic
@@ -174,7 +253,9 @@ export default function SettingsPage({ onPruneComplete } = {}) {
         setPruneStatus('Nothing to prune — no dangling layers found.');
         return;
       }
-      setPruneSelection(summary.images || []);
+      const images = summary.images || [];
+      setPruneCandidates(images);
+      setPruneExcluded(new Set(images.filter((img) => img.fromContainer).map((img) => img.id)));
       setConfirmPrune(true);
     } catch (err) {
       setPruneStatus(err.message || 'Failed to check for dangling layers');
@@ -185,8 +266,13 @@ export default function SettingsPage({ onPruneComplete } = {}) {
 
   // Drop a layer from this prune. It isn't removed, so it reappears the next
   // time the dialog is opened (which re-fetches the current dangling set).
-  const excludePruneImage = useCallback((id) => {
-    setPruneSelection((sel) => sel.filter((img) => img.id !== id));
+  const togglePruneImage = useCallback((id) => {
+    setPruneExcluded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }, []);
 
   const handlePrune = useCallback(async () => {
@@ -212,7 +298,7 @@ export default function SettingsPage({ onPruneComplete } = {}) {
       setPruneStatus(err.message || 'Prune failed');
     } finally {
       setPruning(false);
-      setPruneSelection([]);
+      setPruneCandidates([]);
     }
   }, [onPruneComplete, pruneSelection]);
 
@@ -310,15 +396,39 @@ export default function SettingsPage({ onPruneComplete } = {}) {
             <span className="theme-switch-text">{settings?.autoCheckOnOpen ? 'On' : 'Off'}</span>
           </button>
         </div>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Newer version tags</span>
+            <span className="settings-row-desc">
+              For containers on a version tag (e.g. <code>postgres:16.3</code>), offer newer
+              versions like 16.4 — and optionally the next major version.
+            </span>
+          </div>
+          <select
+            className="settings-input settings-select settings-time"
+            value={settings?.tagUpdates || 'minor'}
+            onChange={(e) => saveSetting({ tagUpdates: e.target.value }).catch(() => {})}
+            disabled={!settings}
+            aria-label="Newer version tags"
+          >
+            <option value="off">Off</option>
+            <option value="minor">Same major</option>
+            <option value="major">Include major</option>
+          </select>
+        </div>
       </section>
 
       <section className="settings-section">
         <h3>Background checks &amp; notifications</h3>
         <div className="settings-row">
           <div className="settings-row-label">
-            <span>Daily scan</span>
+            <span>Background scan</span>
             <span className="settings-row-desc">
-              Run a scan once a day even when the app is closed.
+              Check for updates on a schedule, even when the app is closed. A scan missed while
+              the server was off runs shortly after it starts.
+              {settings?.backgroundCheckEnabled && status?.nextScanAt ? (
+                <> Next scan {formatWhen(status.nextScanAt)}.</>
+              ) : null}
             </span>
           </div>
           <button
@@ -328,7 +438,9 @@ export default function SettingsPage({ onPruneComplete } = {}) {
             aria-checked={!!settings?.backgroundCheckEnabled}
             aria-label="Toggle background checks"
             onClick={() =>
-              saveSetting({ backgroundCheckEnabled: !settings?.backgroundCheckEnabled }).catch(() => {})
+              saveSetting({ backgroundCheckEnabled: !settings?.backgroundCheckEnabled })
+                .then(refreshStatus)
+                .catch(() => {})
             }
             disabled={!settings}
           >
@@ -340,28 +452,68 @@ export default function SettingsPage({ onPruneComplete } = {}) {
         </div>
         <div className="settings-row">
           <div className="settings-row-label">
-            <span>Daily scan time</span>
-            <span className="settings-row-desc">
-              When the daily scan runs, on the <strong>server's clock</strong>
-              {status?.timeZone ? (
-                <>
-                  {' '}
-                  — currently {status.serverLocalTime} {status.timeZone}. If that's off, set the
-                  container's <code>TZ</code> (e.g. <code>TZ=Europe/London</code>).
-                </>
-              ) : (
-                '.'
-              )}
-            </span>
+            <span>Schedule</span>
+            <span className="settings-row-desc">Once a day at a set time, or every few hours.</span>
           </div>
-          <input
-            type="time"
-            className="settings-input settings-time"
-            value={settings?.scheduledCheckTime || '09:00'}
-            onChange={(e) => saveSetting({ scheduledCheckTime: e.target.value }).catch(() => {})}
+          <select
+            className="settings-input settings-select settings-time"
+            value={settings?.scheduleMode || 'daily'}
+            onChange={(e) => saveSetting({ scheduleMode: e.target.value }).then(refreshStatus).catch(() => {})}
             disabled={!settings || !settings?.backgroundCheckEnabled}
-          />
+            aria-label="Scan schedule"
+          >
+            <option value="daily">Daily</option>
+            <option value="interval">Every N hours</option>
+          </select>
         </div>
+        {settings?.scheduleMode === 'interval' ? (
+          <div className="settings-row">
+            <div className="settings-row-label">
+              <span>Scan every</span>
+              <span className="settings-row-desc">Hours between scans (1–168).</span>
+            </div>
+            <select
+              className="settings-input settings-select settings-time"
+              value={String(settings?.scheduleIntervalHours || 6)}
+              onChange={(e) =>
+                saveSetting({ scheduleIntervalHours: Number(e.target.value) }).then(refreshStatus).catch(() => {})
+              }
+              disabled={!settings || !settings?.backgroundCheckEnabled}
+              aria-label="Hours between scans"
+            >
+              {[1, 2, 3, 4, 6, 8, 12, 24, 48, 168].map((h) => (
+                <option key={h} value={String(h)}>
+                  {h === 168 ? '1 week' : h === 48 ? '2 days' : `${h} hour${h === 1 ? '' : 's'}`}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="settings-row">
+            <div className="settings-row-label">
+              <span>Daily scan time</span>
+              <span className="settings-row-desc">
+                When the daily scan runs, on the <strong>server's clock</strong>
+                {status?.timeZone ? (
+                  <>
+                    {' '}
+                    — currently {status.serverLocalTime} {status.timeZone}. If that's off, set the
+                    container's <code>TZ</code> (e.g. <code>TZ=Europe/London</code>).
+                  </>
+                ) : (
+                  '.'
+                )}
+              </span>
+            </div>
+            <input
+              type="time"
+              className="settings-input settings-time"
+              value={settings?.scheduledCheckTime || '09:00'}
+              onChange={(e) => saveSetting({ scheduledCheckTime: e.target.value }).then(refreshStatus).catch(() => {})}
+              disabled={!settings || !settings?.backgroundCheckEnabled}
+            />
+          </div>
+        )}
         <div className="settings-row">
           <div className="settings-row-label">
             <span>Notify via</span>
@@ -403,7 +555,7 @@ export default function SettingsPage({ onPruneComplete } = {}) {
         <div className="settings-row">
           <div className="settings-row-label">
             <span>Send notifications</span>
-            <span className="settings-row-desc">Notify on the daily scan when updates are found.</span>
+            <span className="settings-row-desc">Notify after a background scan when updates are found.</span>
           </div>
           <button
             type="button"
@@ -418,6 +570,28 @@ export default function SettingsPage({ onPruneComplete } = {}) {
               <span className="theme-switch-thumb" />
             </span>
             <span className="theme-switch-text">{settings?.discordEnabled ? 'On' : 'Off'}</span>
+          </button>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Notify on failures</span>
+            <span className="settings-row-desc">
+              Also send a message when an update or revert fails, or comes up unhealthy.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="theme-switch"
+            role="switch"
+            aria-checked={!!settings?.notifyOnFailure}
+            aria-label="Toggle failure notifications"
+            onClick={() => saveSetting({ notifyOnFailure: !settings?.notifyOnFailure }).catch(() => {})}
+            disabled={!settings || !settings?.discordEnabled}
+          >
+            <span className="theme-switch-track">
+              <span className="theme-switch-thumb" />
+            </span>
+            <span className="theme-switch-text">{settings?.notifyOnFailure ? 'On' : 'Off'}</span>
           </button>
         </div>
         <div className="settings-row">
@@ -524,24 +698,26 @@ export default function SettingsPage({ onPruneComplete } = {}) {
             onConfirm={handlePrune}
             onCancel={() => {
               setConfirmPrune(false);
-              setPruneSelection([]);
+              setPruneCandidates([]);
             }}
           >
             <p className="confirm-message">
-              Leftover layers from image updates. Remove any row with ✕ to keep that layer —
-              it'll reappear here next time. Tagged images and anything in use are never touched.
-              Sizes are what removing each one should free (layers shared with images you still
-              use aren't counted).
+              Leftover layers from image updates. Untick a row to keep it — it'll reappear here
+              next time. Tagged images and anything in use are never touched. Sizes are what
+              removing each one should free (layers shared with images you still use aren't
+              counted).
             </p>
-            {pruneSelection.some((img) => img.fromContainer) && (
+            {pruneCandidates.some((img) => img.fromContainer) && (
               <p className="confirm-message prune-revert-warning">
-                ⚠ Rows named after a container are its previous version — pruning one removes the
-                option to revert that container's last update.
+                Rows named after a container are its previous version, kept so you can revert its
+                last update. They're left out unless you tick them — pruning one removes that
+                container's Revert option.
               </p>
             )}
-            {pruneSelection.length === 0 ? (
-              <p className="prune-empty">All layers excluded — nothing will be pruned.</p>
-            ) : (
+            {pruneSelection.length === 0 && (
+              <p className="prune-empty">Nothing selected — nothing will be pruned.</p>
+            )}
+            {pruneCandidates.length > 0 && (
               <div className="prune-table-scroll">
                 <table className="prune-table">
                   <thead>
@@ -549,12 +725,12 @@ export default function SettingsPage({ onPruneComplete } = {}) {
                       <th>Layer</th>
                       <th className="prune-size">Size</th>
                       <th className="prune-created">Created</th>
-                      <th aria-label="Exclude" />
+                      <th aria-label="Include" />
                     </tr>
                   </thead>
                   <tbody>
-                    {pruneSelection.map((img) => (
-                      <tr key={img.id}>
+                    {pruneCandidates.map((img) => (
+                      <tr key={img.id} className={pruneExcluded.has(img.id) ? 'is-excluded' : undefined}>
                         <td>
                           <span className="prune-source">
                             {img.fromContainer || 'Untracked source'}
@@ -573,23 +749,15 @@ export default function SettingsPage({ onPruneComplete } = {}) {
                         </td>
                         <td className="prune-created">{formatAge(img.created)}</td>
                         <td className="prune-remove-cell">
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-icon prune-row-remove"
-                            onClick={() => excludePruneImage(img.id)}
+                          <input
+                            type="checkbox"
+                            className="prune-row-check"
+                            checked={!pruneExcluded.has(img.id)}
+                            onChange={() => togglePruneImage(img.id)}
                             disabled={pruning}
-                            aria-label={`Exclude ${img.fromContainer || img.id} from prune`}
-                            title="Exclude from prune"
-                          >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                              <path
-                                d="M6 6l12 12M18 6L6 18"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                              />
-                            </svg>
-                          </button>
+                            aria-label={`Prune ${img.fromContainer || img.id}`}
+                            title={pruneExcluded.has(img.id) ? 'Include in prune' : 'Keep this layer'}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -598,6 +766,73 @@ export default function SettingsPage({ onPruneComplete } = {}) {
               </div>
             )}
           </ConfirmDialog>
+        )}
+      </section>
+
+      <section className="settings-section">
+        <h3>Account &amp; data</h3>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Sign out everywhere</span>
+            <span className="settings-row-desc">
+              Signs out every other browser and device. This one stays signed in.
+            </span>
+          </div>
+          <button type="button" className="btn btn-sm" onClick={() => setConfirmLogoutAll(true)} disabled={accountBusy}>
+            Sign out others
+          </button>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Backup</span>
+            <span className="settings-row-desc">
+              Settings, pinned versions and update history as a file — for moving DockPull to a
+              new host. It includes your notification URL, so keep it private.
+            </span>
+          </div>
+          <a className="btn btn-sm" href={`${API_BASE}/backup`} download>
+            Download
+          </a>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-label">
+            <span>Restore</span>
+            <span className="settings-row-desc">
+              Load a backup file. Replaces these settings; history is only restored into an empty
+              history.
+            </span>
+          </div>
+          <label className={`btn btn-sm${accountBusy ? ' is-disabled' : ''}`}>
+            Choose file…
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="visually-hidden"
+              onChange={handleRestoreFile}
+              disabled={accountBusy}
+            />
+          </label>
+        </div>
+        {accountStatus && <p className="settings-test-status">{accountStatus}</p>}
+        {confirmLogoutAll && (
+          <ConfirmDialog
+            title="Sign out everywhere else?"
+            message="Every other browser and device signed in to DockPull will need to log in again."
+            confirmLabel="Sign out others"
+            onConfirm={handleLogoutAll}
+            onCancel={() => setConfirmLogoutAll(false)}
+          />
+        )}
+        {pendingRestore && (
+          <ConfirmDialog
+            title="Restore this backup?"
+            message={`Backup from ${pendingRestore.exportedAt ? new Date(pendingRestore.exportedAt).toLocaleString() : 'an unknown date'}${
+              pendingRestore.appVersion ? ` (DockPull ${pendingRestore.appVersion})` : ''
+            }: ${(pendingRestore.pinned || []).length} pinned, ${(pendingRestore.history || []).length} history entries. Your current settings will be replaced.`}
+            confirmLabel="Restore"
+            onConfirm={handleRestoreConfirm}
+            onCancel={() => setPendingRestore(null)}
+          />
         )}
       </section>
 

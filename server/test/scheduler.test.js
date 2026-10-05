@@ -67,3 +67,28 @@ test('selectNotifyTargets: a normalizeRef failure for one item does not throw', 
   assert.deepEqual(toNotify.map((i) => i.image), ['bad-ref']);
   assert.equal(hasNew, false);
 });
+
+const { planNextRun } = await import('../src/scheduler.js');
+
+test('planNextRun: daily waits for the time; catches up on startup if a run was missed', () => {
+  const now = new Date(2026, 9, 5, 12, 0, 0); // 12:00 local
+  const daily = { scheduleMode: 'daily', scheduledCheckTime: '09:00', scheduleIntervalHours: 6 };
+  const nextNine = 21 * 3600 * 1000;
+  assert.equal(planNextRun(daily, { now, lastCheckAt: now.getTime() - 3600_000 }), nextNine);
+  // Server was down at 09:00 (last check yesterday): run a minute after startup.
+  const yesterday = new Date(2026, 9, 4, 9, 0, 5).getTime();
+  assert.equal(planNextRun(daily, { now, lastCheckAt: yesterday, startup: true }), 60_000);
+  // Already checked after 09:00 today: no catch-up.
+  const after = new Date(2026, 9, 5, 9, 30).getTime();
+  assert.equal(planNextRun(daily, { now, lastCheckAt: after, startup: true }), nextNine);
+  // Never checked: catch up.
+  assert.equal(planNextRun(daily, { now, startup: true }), 60_000);
+});
+
+test('planNextRun: interval counts from the last check, overdue runs soon', () => {
+  const now = new Date(2026, 9, 5, 12, 0, 0);
+  const every6 = { scheduleMode: 'interval', scheduledCheckTime: '09:00', scheduleIntervalHours: 6 };
+  assert.equal(planNextRun(every6, { now, lastCheckAt: now.getTime() - 2 * 3600_000 }), 4 * 3600_000);
+  assert.equal(planNextRun(every6, { now, lastCheckAt: now.getTime() - 10 * 3600_000 }), 60_000);
+  assert.equal(planNextRun(every6, { now }), 60_000);
+});

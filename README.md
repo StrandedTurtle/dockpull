@@ -75,17 +75,33 @@ If the paths don't match you'll get `compose file not found` and broken bind mou
 - **Updates tab** — containers grouped by stack, update-available ones on top.
   Defaults to showing only what needs updating; flip to **All** to see everything.
   Tap **Update** to pull + recreate that service (watch live logs), or **Update all**
-  to run them (one at a time within each stack). After an update DockPull verifies the container actually
-  comes up healthy (catching crash-loops), and offers a one-click **Revert** to the
-  previous image if it doesn't. **Pin Version** holds a container at its current version;
-  **Skip** dismisses just the update on offer, and the card returns when a newer
-  build is published. An update marked **(rebuilt)** has the same version number
-  but a new image — the publisher re-pushed the tag, usually for base-image or
-  security patches.
+  to run them (one at a time within each stack). After an update DockPull verifies the
+  container actually comes up healthy — waiting as long as the container's own
+  healthcheck needs, and catching apps that crash a few seconds after starting — and
+  offers a one-click **Revert** to the previous image if it doesn't. **Pin Version**
+  holds a container at its current version; **Skip** dismisses just the update on
+  offer, and the card returns when a newer build is published. An update marked
+  **(rebuilt)** has the same version number but a new image — the publisher re-pushed
+  the tag, usually for base-image or security patches.
+- **Newer version tags** — for containers on a version tag (`postgres:16.3`,
+  `app:1.2.0`, linuxserver's `4.0.14-ls283`), DockPull also lists the registry's
+  tags and offers the newest one in the same major version (and, if you enable it,
+  the next major). **Switch** edits that service's `image:` line in your compose file
+  (only that line — comments and formatting stay; a `.dockpull.bak` copy is kept),
+  then updates it with the usual health check. If the pull fails the file is put back,
+  and **Revert** restores the old tag in the file too. Images set via a variable
+  (`${TAG}`), an anchor, or a digest are left alone. "Update all" never switches tags.
 - **History tab** — a log of past updates. **Clear history** wipes it (with a confirm).
-- **Settings tab** — theme, default view, auto-check on open, the **daily background
-  scan** + **notifications** (Discord, ntfy, Gotify, or a generic webhook — with a
-  "send test" button), and pinned-version management.
+- **Settings tab** — theme, default view, auto-check on open, newer-tag policy, the
+  **background scan** (daily at a time, or every N hours; a scan missed while the
+  server was off runs shortly after it starts), **notifications** (Discord, ntfy,
+  Gotify, or a generic webhook — with a "send test" button, and optional alerts when
+  an update fails), pinned versions, **prune**, **sign out everywhere**, and
+  **backup / restore** (settings, pins and history as a JSON file — it contains your
+  notification URL, so keep it private).
+- **DockPull updates** — when a new DockPull release is out, a banner shows what
+  changed and the command to update. DockPull never updates its own container
+  (replacing the container it runs in would cut the update off half-way).
 - **Install as an app (PWA)** — use your browser's "Add to Home Screen" / "Install"
   to get a standalone, full-screen icon.
 

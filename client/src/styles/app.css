@@ -1572,3 +1572,113 @@ a {
 
 .breaking-flag { margin-left: 6px; cursor: help; }
 .breaking-note { margin: 0 0 10px; font-size: 0.82rem; color: var(--color-pending); }
+
+.prune-table tr.is-excluded td {
+  opacity: 0.5;
+}
+
+.prune-row-check {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--color-error);
+}
+
+.newer-tags {
+  margin: 10px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.newer-tag-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font-size: 0.85rem;
+}
+
+.newer-tag-label {
+  color: var(--color-text-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.newer-tag-label strong {
+  color: var(--color-text);
+}
+
+.newer-tag-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ---------- DockPull self-update banner ---------- */
+.self-update {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-accent);
+  border-radius: 12px;
+  background: var(--color-card);
+  font-size: 0.9rem;
+}
+
+.self-update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.self-update-text {
+  min-width: 0;
+}
+
+.self-update-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.self-update-panel {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.self-update-panel p {
+  margin: 0 0 8px;
+}
+
+.self-update-cmd {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.self-update-cmd code {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--color-bg);
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+
+.self-update-note {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}

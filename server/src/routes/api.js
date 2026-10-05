@@ -29,6 +29,8 @@ import { sendTest } from '../notify.js';
 import { getChangelog } from '../changelog.js';
 import { isValidNotifyUrl } from '../urlguard.js';
 import * as db from '../db.js';
+import { buildBackup, restoreBackup } from '../backup.js';
+import { getSelfUpdate } from '../self-update.js';
 import { validateContainerNameParam } from '../security.js';
 
 export const apiRouter = express.Router();
@@ -60,6 +62,7 @@ apiRouter.get('/api/status', (req, res) => {
     version: APP_VERSION,
     lastCheck: db.getMeta('lastCheck'),
     danglingImages: db.getMeta('danglingImages'),
+    nextScanAt: scheduler.getNextRunAt(),
     serverTime: now.toISOString(),
     timeZone,
     // Local HH:MM as the server sees it (what the scheduled scan compares to).
@@ -101,6 +104,8 @@ apiRouter.get('/api/containers', async (req, res) => {
     lookupVersion: (digest) => db.getImageVersion(digest),
     getRollback: (name) => db.getRollbackPoint(name),
     getCheckError: (ref) => errorByRef.get(ref) || null,
+    getTagUpdate: (ref) => db.getTagUpdate(ref),
+    tagPolicy: getSettings().tagUpdates,
   });
 
   for (const ref of refsToResolve) {
@@ -296,6 +301,59 @@ apiRouter.delete('/api/skip/:ref', (req, res) => {
     return res.status(400).json({ error: 'invalid_payload' });
   }
   return setSkipped(ref, false, res);
+});
+
+// Hide one offered newer TAG (e.g. "not 17.0 yet") until an even newer one
+// appears. `{ ref, tag: null }` clears it.
+apiRouter.post('/api/skip-tag', (req, res) => {
+  const { ref, tag } = req.body || {};
+  if (typeof ref !== 'string' || (tag !== null && typeof tag !== 'string')) {
+    return res.status(400).json({ error: 'invalid_payload' });
+  }
+  let normalized;
+  try {
+    normalized = normalizeRef(ref);
+  } catch {
+    return res.status(400).json({ error: 'invalid_payload' });
+  }
+  if (!db.dismissTag(normalized, tag)) {
+    return res.status(404).json({ error: 'no_pending_update' });
+  }
+  broadcastGlobal({ type: 'containers-changed' });
+  return res.status(200).json({ ok: true });
+});
+
+// Is a newer DockPull release out? Read-only: DockPull never updates itself.
+apiRouter.get('/api/self-update', async (req, res) => {
+  try {
+    return res.status(200).json(await getSelfUpdate(APP_VERSION));
+  } catch {
+    return res.status(200).json({ current: APP_VERSION, available: false });
+  }
+});
+
+// --- Backup / restore ---
+
+apiRouter.get('/api/backup', (req, res) => {
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.set('Content-Disposition', `attachment; filename="dockpull-backup-${stamp}.json"`);
+  res.set('Cache-Control', 'no-store');
+  return res.status(200).json(buildBackup({ appVersion: APP_VERSION }));
+});
+
+apiRouter.post('/api/restore', (req, res) => {
+  let summary;
+  try {
+    summary = restoreBackup(req.body);
+  } catch (err) {
+    if (err.code === 'invalid_backup') {
+      return res.status(400).json({ error: 'invalid_backup', message: err.message });
+    }
+    throw err;
+  }
+  scheduler.reschedule();
+  broadcastGlobal({ type: 'containers-changed' });
+  return res.status(200).json({ ok: true, ...summary });
 });
 
 // --- Settings ---

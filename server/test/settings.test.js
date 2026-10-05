@@ -17,8 +17,12 @@ test('settings: defaults when nothing stored', () => {
     autoCheckOnOpen: true,
     backgroundCheckEnabled: true,
     scheduledCheckTime: '09:00',
+    scheduleMode: 'daily',
+    scheduleIntervalHours: 6,
+    notifyOnFailure: true,
     discordEnabled: false,
     discordWebhookUrl: '',
+    tagUpdates: 'minor',
     notifyType: 'discord',
   });
 });
@@ -51,4 +55,12 @@ test('settings: webhook url validated, empty allowed', () => {
   assert.equal(s.discordWebhookUrl, 'https://discord.com/api/webhooks/1/abc');
   assert.throws(() => updateSettings({ discordWebhookUrl: 'not-a-url' }), /invalid value/);
   assert.equal(updateSettings({ discordWebhookUrl: '' }).discordWebhookUrl, '');
+});
+
+test('settings: schedule interval and tag policy are validated', () => {
+  assert.equal(updateSettings({ scheduleMode: 'interval', scheduleIntervalHours: 12 }).scheduleIntervalHours, 12);
+  assert.throws(() => updateSettings({ scheduleIntervalHours: 0 }), /invalid value/);
+  assert.throws(() => updateSettings({ scheduleIntervalHours: 2.5 }), /invalid value/);
+  assert.throws(() => updateSettings({ tagUpdates: 'all' }), /invalid value/);
+  assert.equal(updateSettings({ tagUpdates: 'major' }).tagUpdates, 'major');
 });
