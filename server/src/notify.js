@@ -193,6 +193,46 @@ export function sendFailure(type, url, failure, opts) {
   }
 }
 
+/**
+ * Pure: the one message sent when an "Update all" batch finishes.
+ *
+ * @param {{ succeeded: string[], failed: Array<{ name: string, message?: string }> }} summary
+ * @returns {{ title: string, body: string, ok: boolean }}
+ */
+export function buildBatchMessage({ succeeded = [], failed = [] }) {
+  const n = succeeded.length + failed.length;
+  const ok = failed.length === 0;
+  const title = ok
+    ? `✅ Update all finished: ${n} container${n === 1 ? '' : 's'} updated`
+    : `⚠️ Update all finished: ${succeeded.length} updated, ${failed.length} failed`;
+  const lines = [];
+  if (succeeded.length) lines.push(`Updated: ${succeeded.slice(0, MAX_LISTED).join(', ')}${succeeded.length > MAX_LISTED ? ', …' : ''}`);
+  for (const f of failed.slice(0, MAX_LISTED)) {
+    lines.push(`Failed: ${f.name}${f.message ? ` — ${String(f.message).split('\n')[0].slice(0, 200)}` : ''}`);
+  }
+  return { title, body: lines.join('\n'), ok };
+}
+
+/** Send the "Update all finished" summary to the configured target. */
+export function sendBatchSummary(type, url, summary, opts) {
+  const { title: t, body, ok } = buildBatchMessage(summary);
+  switch (type) {
+    case 'ntfy':
+      return postNtfy(url, { title: t, tags: ok ? 'white_check_mark' : 'warning', body }, opts);
+    case 'gotify':
+      return postJson(url, { title: t, message: body, priority: ok ? 4 : 7 }, opts);
+    case 'webhook':
+      return postJson(
+        url,
+        { title: t, message: body, event: 'batch_finished', succeeded: summary.succeeded, failed: summary.failed },
+        opts
+      );
+    case 'discord':
+    default:
+      return postJson(url, { content: `**${t}**\n${body}` }, opts);
+  }
+}
+
 /** Send a one-off test message so the user can confirm their target works. */
 export function sendTest(type, url, opts) {
   const text = '✅ DockPull test — your notifications are configured correctly.';
@@ -222,4 +262,6 @@ export default {
   sendTest,
   sendFailure,
   buildFailureMessage,
+  sendBatchSummary,
+  buildBatchMessage,
 };

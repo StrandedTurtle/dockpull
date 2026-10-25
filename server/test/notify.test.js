@@ -131,3 +131,15 @@ test('sendFailure: every target type delivers (ntfy emoji title via query)', asy
     server.close();
   }
 });
+
+import { buildBatchMessage } from '../src/notify.js';
+
+test('buildBatchMessage: all good vs some failed', () => {
+  const ok = buildBatchMessage({ succeeded: ['a', 'b'], failed: [] });
+  assert.match(ok.title, /2 containers updated/);
+  assert.equal(ok.ok, true);
+  const mixed = buildBatchMessage({ succeeded: ['a'], failed: [{ name: 'db', message: 'Image updated, but it keeps restarting\nmore' }] });
+  assert.match(mixed.title, /1 updated, 1 failed/);
+  assert.match(mixed.body, /Failed: db — Image updated, but it keeps restarting$/m);
+  assert.doesNotMatch(mixed.body, /more/);
+});

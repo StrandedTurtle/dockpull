@@ -149,13 +149,80 @@ export async function getRemoteDigest(imageRef, { timeoutMs = 10000 } = {}) {
  * @param {Array<{ platform?: { os?: string, architecture?: string } }>} manifests
  * @returns {object|null}
  */
-export function pickPlatformManifest(manifests) {
+export function pickPlatformManifest(manifests, arch = hostArch()) {
   if (!Array.isArray(manifests) || manifests.length === 0) return null;
+  const real = manifests.filter((m) => m.platform?.os !== 'unknown'); // skip attestation entries
   return (
-    manifests.find((m) => m.platform?.os === 'linux' && m.platform?.architecture === 'amd64') ||
-    manifests.find((m) => m.platform?.os === 'linux') ||
+    real.find((m) => m.platform?.os === 'linux' && m.platform?.architecture === arch) ||
+    real.find((m) => m.platform?.os === 'linux' && m.platform?.architecture === 'amd64') ||
+    real.find((m) => m.platform?.os === 'linux') ||
+    real[0] ||
     manifests[0]
   );
+}
+
+/** This server's CPU as Docker names it (x64 -> amd64), so a Pi reads arm64 manifests. */
+export function hostArch() {
+  return { x64: 'amd64', arm64: 'arm64', arm: 'arm', ia32: '386', ppc64: 'ppc64le', s390x: 's390x' }[process.arch] || 'amd64';
+}
+
+/**
+ * Fetch a manifest (by tag or digest) with the registry's auth flow; follows
+ * an index/list to this host's platform. Returns the image manifest or null.
+ */
+async function fetchImageManifest(registry, repository, reference, timeoutMs, auth = { header: null }) {
+  const base = registryBaseUrl(registry);
+  const get = (ref) =>
+    fetch(`${base}/v2/${repository}/manifests/${encodeURIComponent(ref)}`, {
+      headers: { Accept: MANIFEST_ACCEPT, ...(auth.header ? { Authorization: auth.header } : {}) },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  let res = await get(reference);
+  if (res.status === 401) {
+    auth.header = await resolveAuthHeader(res, registry, repository, timeoutMs);
+    if (auth.header) res = await get(reference);
+  }
+  if (!res.ok) return null;
+  let manifest = await res.json().catch(() => null);
+  if (Array.isArray(manifest?.manifests)) {
+    const picked = pickPlatformManifest(manifest.manifests);
+    if (!picked?.digest) return null;
+    const sub = await get(picked.digest);
+    if (!sub.ok) return null;
+    manifest = await sub.json().catch(() => null);
+  }
+  return manifest && Array.isArray(manifest.layers) ? manifest : null;
+}
+
+/**
+ * Pure: bytes to download to go from `oldLayers` to `newLayers` — Docker only
+ * pulls layers it doesn't already have. Sizes are the compressed (download)
+ * sizes from the manifests.
+ */
+export function newLayerBytes(newLayers, oldLayers = []) {
+  const have = new Set((oldLayers || []).map((l) => l.digest));
+  return (newLayers || []).reduce((sum, l) => (have.has(l.digest) ? sum : sum + (Number(l.size) || 0)), 0);
+}
+
+/**
+ * Best-effort: how much an update will download — the new image's layers that
+ * the running image doesn't already have. `exact` is false when the running
+ * image's manifest couldn't be read (then it's the whole new image, an upper
+ * bound). Never throws; null when unknown.
+ *
+ * @returns {Promise<{ bytes: number, exact: boolean }|null>}
+ */
+export async function getDownloadSize(imageRef, newDigest, oldDigest, { timeoutMs = 10000 } = {}) {
+  try {
+    const { registry, repository } = parseRef(imageRef);
+    const auth = { header: null };
+    const next = await fetchImageManifest(registry, repository, newDigest, timeoutMs, auth);
+    if (!next) return null;
+    const prev = oldDigest ? await fetchImageManifest(registry, repository, oldDigest, timeoutMs, auth) : null;
+    return { bytes: newLayerBytes(next.layers, prev?.layers), exact: Boolean(prev) };
+  } catch {
+    return null;
+  }
 }
 
 async function authedJson(url, authHeader, timeoutMs) {
@@ -285,4 +352,4 @@ export async function listTags(imageRef, { timeoutMs = 15000, maxPages = 10 } = 
   return tags;
 }
 
-export default { registryBaseUrl, listTags, nextPageUrl, getRemoteDigest, getRemoteVersion, parseWwwAuthenticate, pickPlatformManifest };
+export default { registryBaseUrl, getDownloadSize, newLayerBytes, hostArch, listTags, nextPageUrl, getRemoteDigest, getRemoteVersion, parseWwwAuthenticate, pickPlatformManifest };

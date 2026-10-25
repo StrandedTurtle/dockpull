@@ -15,6 +15,7 @@ import {
   listContainers,
   getContainerImageMeta,
   listDanglingImages,
+  getContainerLogs,
   pruneDanglingImages,
   removeDanglingImages,
   shortImageId,
@@ -105,6 +106,7 @@ apiRouter.get('/api/containers', async (req, res) => {
     getRollback: (name) => db.getRollbackPoint(name),
     getCheckError: (ref) => errorByRef.get(ref) || null,
     getTagUpdate: (ref) => db.getTagUpdate(ref),
+    getAutoRevert: (name) => db.getAutoRevert(name),
     tagPolicy: getSettings().tagUpdates,
   });
 
@@ -330,6 +332,26 @@ apiRouter.get('/api/self-update', async (req, res) => {
   } catch {
     return res.status(200).json({ current: APP_VERSION, available: false });
   }
+});
+
+// The container's own recent output (e.g. why an update crash-loops).
+apiRouter.get('/api/containers/:name/logs', async (req, res) => {
+  const tail = toSafeInt(req.query.tail, 200, 1000);
+  try {
+    res.set('Cache-Control', 'no-store');
+    return res.status(200).json(await getContainerLogs(req.params.name, tail));
+  } catch (err) {
+    if (err.statusCode === 404) return res.status(404).json({ error: 'not_found' });
+    return res.status(503).json({ error: 'docker_unavailable' });
+  }
+});
+
+// The saved live log of one past update (history rows carry `has_log`).
+apiRouter.get('/api/history/entry/:id/log', (req, res) => {
+  if (!/^\d{1,12}$/.test(req.params.id)) return res.status(400).json({ error: 'invalid_id' });
+  const log = db.getHistoryLog(Number(req.params.id));
+  if (log === null) return res.status(404).json({ error: 'not_found' });
+  return res.status(200).json({ log });
 });
 
 // --- Backup / restore ---

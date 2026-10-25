@@ -96,6 +96,12 @@ const SPEC = {
     fromStore: (v) => bool(v, true),
     fromInput: (v) => (typeof v === 'boolean' ? v : undefined),
   },
+  // Send one summary message when an "Update all" batch finishes.
+  notifyBatchSummary: {
+    default: true,
+    fromStore: (v) => bool(v, true),
+    fromInput: (v) => (typeof v === 'boolean' ? v : undefined),
+  },
   // Master "send notifications" toggle (kept this key for back-compat).
   discordEnabled: {
     default: ENV_WEBHOOK !== '',

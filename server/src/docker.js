@@ -152,10 +152,19 @@ export function pickRepoDigests(repoDigests, image) {
  * @param {string} image - configured image ref, e.g. "nginx:latest".
  * @returns {Promise<{ digest: string|null, digests: string[], version: string|null, source: string|null }>}
  */
-async function inspectImageMeta(imageIdOrName, image) {
+async function inspectImageMeta(imageIdOrName, image, cache = null) {
   let imageInfo;
   try {
-    imageInfo = await docker.getImage(imageIdOrName).inspect();
+    if (cache) {
+      if (!cache.has(imageIdOrName)) {
+        const p = docker.getImage(imageIdOrName).inspect();
+        p.catch(() => {}); // a failure is handled by whichever caller awaits it
+        cache.set(imageIdOrName, p);
+      }
+      imageInfo = await cache.get(imageIdOrName);
+    } else {
+      imageInfo = await docker.getImage(imageIdOrName).inspect();
+    }
   } catch (err) {
     console.warn(`docker.js: failed to inspect image ${imageIdOrName}: ${err.message}`);
     return { digest: null, digests: [], version: null, source: null };
@@ -324,6 +333,24 @@ async function tagPointsElsewhere(ref, imageId, cache) {
 }
 
 /**
+ * Pure helper: map `items` through async `fn` with at most `limit` in flight,
+ * preserving order.
+ */
+export async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/**
  * Lists all containers (including stopped ones) with the fields needed by
  * the `/api/containers` endpoint's docker-derived data. Skips (with a
  * logged warning) any container that fails to inspect, rather than
@@ -337,10 +364,10 @@ async function tagPointsElsewhere(ref, imageId, cache) {
  */
 export async function listContainers() {
   const summaries = await docker.listContainers({ all: true });
-  const results = [];
   const tagIdCache = new Map(); // image ref -> local image ID it points at
+  const imageCache = new Map(); // image ID -> image inspect (shared by containers)
 
-  for (const summary of summaries) {
+  const inspectOne = async (summary) => {
     try {
       const container = docker.getContainer(summary.Id);
       const inspectData = await container.inspect();
@@ -350,16 +377,16 @@ export async function listContainers() {
       // Never list our own container — offering to update it would recreate
       // the container running this process mid-update.
       if (isSelfContainer(name, summary.Id)) {
-        continue;
+        return null;
       }
 
       const image = trackedImageRef(inspectData);
       if (!image) {
         console.warn(`docker.js: container ${name} has no Config.Image, skipping`);
-        continue;
+        return null;
       }
 
-      const meta = await inspectImageMeta(inspectData.Image, image);
+      const meta = await inspectImageMeta(inspectData.Image, image, imageCache);
       const { version: currentVersion, source: sourceUrl } = meta;
       let currentDigests = meta.digests;
       // A reverted container runs an untagged image with no RepoDigests; use
@@ -402,7 +429,7 @@ export async function listContainers() {
         tag = parseRef(image).tag;
       } catch (err) {
         console.warn(`docker.js: failed to normalize ref "${image}" for ${name}: ${err.message}`);
-        continue;
+        return null;
       }
 
       // Flag compose-managed containers whose compose file isn't reachable
@@ -410,7 +437,7 @@ export async function listContainers() {
       // the dashboard can warn before an update is attempted.
       const composeFileMissing = Boolean(composeFile) && !fs.existsSync(composeFile);
 
-      results.push({
+      return {
         name,
         image,
         tag,
@@ -425,14 +452,16 @@ export async function listContainers() {
         workingDir: workingDir || null,
         state: inspectData.State?.Status || summary.State || 'unknown',
         normalizedRef,
-      });
+      };
     } catch (err) {
       console.warn(`docker.js: failed to inspect container ${summary.Id}: ${err.message}`);
-      // skip this container, continue with the rest
+      return null; // skip this container, continue with the rest
     }
-  }
+  };
 
-  return results;
+  // Inspect several containers at once (one-by-one made the dashboard slow on
+  // hosts with many containers), keeping Docker's order.
+  return (await mapLimit(summaries, 8, inspectOne)).filter(Boolean);
 }
 
 /**
@@ -1225,6 +1254,52 @@ export async function getContainerImageMeta(name) {
   if (!image) return { image: null, currentVersion: null, sourceUrl: null };
   const { version, source } = await inspectImageMeta(inspectData.Image, image);
   return { image, currentVersion: version, sourceUrl: source || knownSourceFor(image) };
+}
+
+/**
+ * Pure: decode Docker's multiplexed log stream (used when a container has no
+ * TTY): frames of [stream byte, 0, 0, 0, uint32 BE length, payload]. A TTY
+ * container's logs are raw text instead; detect that by the header shape.
+ *
+ * @param {Buffer} buf
+ * @returns {string}
+ */
+export function demuxDockerLogs(buf) {
+  if (!Buffer.isBuffer(buf)) return String(buf ?? '');
+  const looksFramed =
+    buf.length >= 8 && buf[0] <= 2 && buf[1] === 0 && buf[2] === 0 && buf[3] === 0;
+  if (!looksFramed) return buf.toString('utf8');
+  const parts = [];
+  let i = 0;
+  while (i + 8 <= buf.length) {
+    const len = buf.readUInt32BE(i + 4);
+    parts.push(buf.subarray(i + 8, i + 8 + len));
+    i += 8 + len;
+  }
+  return Buffer.concat(parts).toString('utf8');
+}
+
+/**
+ * The last `tail` lines of a container's own output (stdout + stderr), e.g. to
+ * see why an update crash-loops. Capped to keep responses small.
+ *
+ * @returns {Promise<{ text: string, state: string, restartCount: number }>}
+ */
+export async function getContainerLogs(name, tail = 200) {
+  const container = docker.getContainer(name);
+  const info = await container.inspect();
+  const raw = await container.logs({
+    stdout: true,
+    stderr: true,
+    timestamps: true,
+    tail: Math.min(Math.max(1, tail), 1000),
+  });
+  const text = info.Config?.Tty ? Buffer.from(raw).toString('utf8') : demuxDockerLogs(Buffer.from(raw));
+  return {
+    text: text.slice(-200_000),
+    state: info.State?.Status || 'unknown',
+    restartCount: info.RestartCount ?? 0,
+  };
 }
 
 /**

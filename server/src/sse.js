@@ -16,7 +16,11 @@
 
 const sessions = new Map();
 
-const FINISHED_SESSION_TTL_MS = 30_000;
+// Keep a finished update's log long enough for a dashboard that was closed or
+// on another page to come back and still see what happened.
+const FINISHED_SESSION_TTL_MS = 15 * 60_000;
+// Cap per-session memory (a pull of a big image prints a lot of progress).
+const MAX_LINES = 2000;
 
 /**
  * @param {string} name
@@ -73,7 +77,38 @@ export function pushLog(name, line, stream) {
 
   const evt = { type: 'log', line, stream };
   session.lines.push(evt);
+  if (session.lines.length > MAX_LINES) {
+    session.lines.splice(0, session.lines.length - MAX_LINES);
+    session.dropped = (session.dropped || 0) + 1;
+  }
+  session.total = (session.total || 0) + 1;
   writeToSubscribers(session, evt);
+}
+
+/**
+ * How many log lines a session has produced so far (including any trimmed
+ * from memory) — a cursor for logTail(name, n, since).
+ */
+export function logCount(name) {
+  return sessions.get(name)?.total || 0;
+}
+
+/**
+ * The last `n` log lines of a session as text, optionally only those produced
+ * after cursor `since` (from logCount). Used to save an update's log with its
+ * history entry.
+ */
+export function logTail(name, n = 200, since = 0) {
+  const session = sessions.get(name);
+  if (!session) return '';
+  const total = session.total || 0;
+  const firstKept = total - session.lines.length;
+  const from = Math.max(0, since - firstKept);
+  return session.lines
+    .slice(from)
+    .slice(-n)
+    .map((e) => e.line)
+    .join('\n');
 }
 
 /**
@@ -246,6 +281,8 @@ export function broadcastGlobal(evt) {
 }
 
 export default {
+  logCount,
+  logTail,
   startSession,
   isActive,
   pushLog,
