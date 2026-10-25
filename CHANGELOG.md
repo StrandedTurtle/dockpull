@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.1](https://github.com/StrandedTurtle/dockpull/compare/v1.9.0...v1.9.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **build:** install server deps natively, not under QEMU (fixes stalled :latest builds) ([#122](https://github.com/StrandedTurtle/dockpull/issues/122)) ([c32e82e](https://github.com/StrandedTurtle/dockpull/commit/c32e82ecf850f9fbb651a4be0f9ea34ee3c40a58))
+* **deps-dev:** bump fast-uri from 3.1.7 to 3.1.9 in /client ([#121](https://github.com/StrandedTurtle/dockpull/issues/121)) ([aa17e08](https://github.com/StrandedTurtle/dockpull/commit/aa17e08f5c6b54d6074f3bfa6d0a29cd5689b673))
+* **deps-dev:** bump serialize-javascript from 7.0.6 to 7.1.4 in /client ([#119](https://github.com/StrandedTurtle/dockpull/issues/119)) ([7d15085](https://github.com/StrandedTurtle/dockpull/commit/7d150852eb680f57e0cb33aed52ed433340b21e4))
+* **deps:** bump body-parser from 2.3.0 to 2.4.0 in /server ([#120](https://github.com/StrandedTurtle/dockpull/issues/120)) ([663600d](https://github.com/StrandedTurtle/dockpull/commit/663600d7ef6f49c554fc57b198f1d01ed7d313ab))
+
 ## [1.9.0](https://github.com/StrandedTurtle/dockpull/compare/v1.8.0...v1.9.0) (2026-10-25)
 
 
