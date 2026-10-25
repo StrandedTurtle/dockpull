@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getContainers, checkNow, getSettings, updateSettings, getStatus, API_BASE } from './api.js';
+import { getContainers, checkNow, getSettings, updateSettings, getStatus, updateAll } from './api.js';
+import { useLive, useLiveEvent } from './hooks/useLive.jsx';
 import UpdateCard from './components/UpdateCard.jsx';
 import UpdateAllButton from './components/UpdateAllButton.jsx';
 import StackGroup from './components/StackGroup.jsx';
@@ -59,7 +60,15 @@ export default function Dashboard({ onPendingCountChange }) {
   const [filter, setFilter] = useState('updates');
   const [search, setSearch] = useState('');
   const [lastCheckedAt, setLastCheckedAt] = useState(null);
-  const [batchSummary, setBatchSummary] = useState(null);
+  const [batchError, setBatchError] = useState('');
+  const [dismissedBatch, setDismissedBatch] = useState(() => {
+    try {
+      return localStorage.getItem('dockpull.dismissedBatch') || '';
+    } catch {
+      return '';
+    }
+  });
+  const { jobsByName, batch, refreshJobs } = useLive();
   // Re-render every minute so "Last checked Xm ago" doesn't go stale while
   // the page sits open.
   const [, setClockTick] = useState(0);
@@ -69,18 +78,34 @@ export default function Dashboard({ onPendingCountChange }) {
     return () => clearInterval(id);
   }, []);
 
-  // name -> run() function, populated by each UpdateCard so "Update all"
-  // can drive the same start+SSE flow the per-card button uses.
-  const runnersRef = useRef(new Map());
-
+  // Coalesced reload: while a load is in flight, further requests (several
+  // updates finishing, live events, a card settling) collapse into ONE
+  // follow-up load instead of each re-inspecting every container.
+  const loadState = useRef({ inFlight: null, again: false });
   const load = useCallback(async () => {
-    setError('');
-    try {
-      const data = await getContainers();
-      setContainers(Array.isArray(data) ? data : []);
-    } catch (err) {
-      setError(err.message || 'Failed to load containers');
+    const st = loadState.current;
+    if (st.inFlight) {
+      st.again = true;
+      return st.inFlight;
     }
+    st.inFlight = (async () => {
+      do {
+        st.again = false;
+        setError('');
+        try {
+          const data = await getContainers();
+          setContainers(Array.isArray(data) ? data : []);
+        } catch (err) {
+          setError(err.message || 'Failed to load containers');
+        }
+      } while (st.again);
+    })();
+    try {
+      await st.inFlight;
+    } finally {
+      st.inFlight = null;
+    }
+    return undefined;
   }, []);
 
   // Actively ask the server to re-check registries, then refresh the list.
@@ -151,50 +176,48 @@ export default function Dashboard({ onPendingCountChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live updates: refresh automatically when the server signals a change.
-  useEffect(() => {
-    let es;
-    let debounce;
-    try {
-      // API_BASE (not a literal '/api') so live refresh works under a subpath.
-      es = new EventSource(`${API_BASE}/events`);
-      es.onmessage = (e) => {
-        let payload;
-        try {
-          payload = JSON.parse(e.data);
-        } catch {
-          return;
-        }
-        if (payload && payload.type === 'containers-changed') {
-          clearTimeout(debounce);
-          debounce = setTimeout(() => load(), 400);
-        }
-      };
-    } catch {
-      // EventSource unavailable — manual Check still works.
-    }
-    return () => {
-      clearTimeout(debounce);
-      if (es) es.close();
-    };
+  // Live updates: refresh when the server signals a change, and after coming
+  // back to the app (events may have been missed while it was hidden).
+  const debounceRef = useRef(null);
+  const scheduleLoad = useCallback(() => {
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => load(), 400);
   }, [load]);
+  useEffect(() => () => clearTimeout(debounceRef.current), []);
+  useLiveEvent('containers-changed', scheduleLoad);
+  useLiveEvent('reconnected', scheduleLoad);
 
   const handleSettled = useCallback(() => {
-    load();
-  }, [load]);
+    scheduleLoad();
+  }, [scheduleLoad]);
 
-  const registerRunner = useCallback((name, runFn) => {
-    if (runFn) {
-      runnersRef.current.set(name, runFn);
-    } else {
-      runnersRef.current.delete(name);
+  // "Update all" runs on the server: send the list, then just watch.
+  const startUpdateAll = useCallback(
+    async (names) => {
+      setBatchError('');
+      try {
+        const r = await updateAll(names);
+        if (r?.skipped?.length) {
+          setBatchError(
+            `Skipped ${r.skipped.map((x) => `${x.name} (${x.reason})`).join(', ')}.`
+          );
+        }
+      } catch (err) {
+        setBatchError(err.message || 'Failed to start Update all');
+      } finally {
+        refreshJobs();
+      }
+    },
+    [refreshJobs]
+  );
+
+  const dismissBatch = useCallback((id) => {
+    setDismissedBatch(id);
+    try {
+      localStorage.setItem('dockpull.dismissedBatch', id);
+    } catch {
+      // ignore
     }
-  }, []);
-
-  const runUpdateFor = useCallback((name) => {
-    const runFn = runnersRef.current.get(name);
-    if (!runFn) return Promise.resolve();
-    return runFn();
   }, []);
 
   const setFilterPersisted = useCallback((value) => {
@@ -202,11 +225,6 @@ export default function Dashboard({ onPendingCountChange }) {
     updateSettings({ defaultFilter: value }).catch(() => {
       // non-fatal: the view still changes even if persisting the default fails
     });
-  }, []);
-
-  const handleBatchDone = useCallback((outcomes) => {
-    const failed = outcomes.filter((o) => !o.success);
-    setBatchSummary({ ok: outcomes.length - failed.length, failed });
   }, []);
 
   // Pinned go to their own bottom section; everything else is the main list.
@@ -230,7 +248,10 @@ export default function Dashboard({ onPendingCountChange }) {
   // Apply the filter chip + search needle, then group by stack (compose
   // project); groups with updates come first.
   const groups = useMemo(() => {
-    let items = filter === 'updates' ? mainItems.filter(hasUpdate) : mainItems;
+    // In "Updates only", keep cards with a queued/running or recently
+    // finished job on screen, so a finished update shows its result instead of
+    // vanishing the moment it no longer has an update.
+    let items = filter === 'updates' ? mainItems.filter((c) => hasUpdate(c) || jobsByName.has(c.name)) : mainItems;
     const needle = search.trim().toLowerCase();
     if (needle) {
       items = items.filter(
@@ -260,7 +281,7 @@ export default function Dashboard({ onPendingCountChange }) {
       return a.project.localeCompare(b.project);
     });
     return out;
-  }, [mainItems, filter, search]);
+  }, [mainItems, filter, search, jobsByName]);
 
   const mainCount = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups]);
 
@@ -289,9 +310,9 @@ export default function Dashboard({ onPendingCountChange }) {
           </button>
           <UpdateAllButton
             targets={pendingTargets}
-            runUpdate={runUpdateFor}
+            onStart={startUpdateAll}
+            batch={batch}
             disabled={loading || !!error}
-            onBatchDone={handleBatchDone}
           />
         </div>
       </div>
@@ -332,25 +353,27 @@ export default function Dashboard({ onPendingCountChange }) {
 
       {checkMsg && <p className="check-msg">{checkMsg}</p>}
 
-      {batchSummary && (
+      {batchError && <p className="check-msg">{batchError}</p>}
+
+      {batch && batch.finishedAt && batch.total > 0 && dismissedBatch !== batch.id && (
         <div
-          className={`banner ${batchSummary.failed.length > 0 ? 'banner-warn' : 'banner-ok'} batch-banner`}
+          className={`banner ${batch.failed.length > 0 ? 'banner-warn' : 'banner-ok'} batch-banner`}
           role="status"
         >
           <span>
-            <strong>Update all finished:</strong> {batchSummary.ok} updated
-            {batchSummary.failed.length > 0 && (
+            <strong>Update all finished:</strong> {batch.succeeded.length} updated
+            {batch.failed.length > 0 && (
               <>
-                , {batchSummary.failed.length} failed —{' '}
-                {batchSummary.failed.map((f) => f.name).join(', ')}. See those cards for details.
+                , {batch.failed.length} failed — {batch.failed.map((f) => f.name).join(', ')}. See
+                those cards for details.
               </>
             )}
-            {batchSummary.failed.length === 0 && '. 🎉'}
+            {batch.failed.length === 0 && '. 🎉'}
           </span>
           <button
             type="button"
             className="banner-dismiss"
-            onClick={() => setBatchSummary(null)}
+            onClick={() => dismissBatch(batch.id)}
             aria-label="Dismiss summary"
           >
             ×
@@ -434,7 +457,7 @@ export default function Dashboard({ onPendingCountChange }) {
                     container={container}
                     onSettled={handleSettled}
                     onPinChange={load}
-                    registerRunner={registerRunner}
+                    job={jobsByName.get(container.name) || null}
                   />
                 ))}
               </div>
@@ -458,7 +481,7 @@ export default function Dashboard({ onPendingCountChange }) {
                   container={container}
                   onSettled={handleSettled}
                   onPinChange={load}
-                  registerRunner={registerRunner}
+                  job={jobsByName.get(container.name) || null}
                 />
               ))}
             </div>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getHistoryLog } from '../api.js';
 
 function shortDigest(digest) {
   if (!digest) return '—';
@@ -42,7 +43,11 @@ function relativeTime(value) {
  */
 export default function HistoryRow({ entry }) {
   const [expanded, setExpanded] = useState(false);
+  const [log, setLog] = useState(null);
+  const [logState, setLogState] = useState(''); // '' | 'loading' | error text
   const {
+    id,
+    has_log,
     container_name,
     image,
     old_digest,
@@ -121,6 +126,31 @@ export default function HistoryRow({ entry }) {
             <span className="digest-value digest-value-full">{new_digest || '—'}</span>
           </div>
           {message && <p className="history-row-message">{message}</p>}
+          {has_log ? (
+            <div className="history-row-log" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+              {log === null ? (
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={logState === 'loading'}
+                  onClick={async () => {
+                    setLogState('loading');
+                    try {
+                      setLog((await getHistoryLog(id))?.log || '');
+                      setLogState('');
+                    } catch (err) {
+                      setLogState(err.message || 'Failed to load log');
+                    }
+                  }}
+                >
+                  {logState === 'loading' ? 'Loading…' : 'Show update log'}
+                </button>
+              ) : (
+                <pre className="changelog-body history-log-body">{log || '(empty)'}</pre>
+              )}
+              {logState && logState !== 'loading' && <p className="history-row-message">{logState}</p>}
+            </div>
+          ) : null}
           {date && <p className="history-row-absolute-time">{date.toLocaleString()}</p>}
         </div>
       )}

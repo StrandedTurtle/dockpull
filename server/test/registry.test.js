@@ -69,3 +69,26 @@ test('nextPageUrl: follows same-origin rel=next links only', () => {
   assert.equal(nextPageUrl(null, base), null);
   assert.equal(nextPageUrl('</v2/x>; rel="prev"', base), null);
 });
+
+import { newLayerBytes, hostArch } from '../src/registry.js';
+
+test('newLayerBytes: only layers the old image lacks count', () => {
+  const a = { digest: 'sha256:a', size: 100 };
+  const b = { digest: 'sha256:b', size: 20 };
+  const c = { digest: 'sha256:c', size: 5 };
+  assert.equal(newLayerBytes([a, b, c], [a, b]), 5);
+  assert.equal(newLayerBytes([a, c]), 105); // unknown old image -> whole image
+  assert.equal(newLayerBytes([], [a]), 0);
+});
+
+test('pickPlatformManifest: prefers this host\'s CPU and skips attestation entries', () => {
+  const manifests = [
+    { digest: 'sha256:att', platform: { os: 'unknown', architecture: 'unknown' } },
+    { digest: 'sha256:amd', platform: { os: 'linux', architecture: 'amd64' } },
+    { digest: 'sha256:arm', platform: { os: 'linux', architecture: 'arm64' } },
+  ];
+  assert.equal(pickPlatformManifest(manifests, 'arm64').digest, 'sha256:arm');
+  assert.equal(pickPlatformManifest(manifests, 'amd64').digest, 'sha256:amd');
+  assert.equal(pickPlatformManifest(manifests, 'riscv64').digest, 'sha256:amd');
+  assert.ok(['amd64', 'arm64', 'arm', '386', 'ppc64le', 's390x'].includes(hostArch()));
+});

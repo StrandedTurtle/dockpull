@@ -1,57 +1,40 @@
 import React, { useCallback, useState } from 'react';
 
 /**
- * Updates every container with `updateAvailable && !pinned`. Containers in the
- * same stack (compose project) run one at a time — concurrent `docker compose
- * up` calls against one project can race on its shared networks and
- * dependencies — while different stacks proceed in parallel. A failure on one
- * container does not stop the others: `runUpdate` resolves (never rejects)
- * with the outcome.
+ * "Update all": hands the list of containers with a pending update to the
+ * server, which queues and runs them itself (one at a time within each stack,
+ * stacks in parallel). Nothing here needs to stay open — leaving the page or
+ * locking the phone doesn't stop the batch — and progress comes back from the
+ * server's batch (`batch` from the app-wide live state).
  *
- * `targets` is `[{ name, project }]`. Disabled when there are no eligible
- * targets or any update is in flight.
+ * props:
+ *  - targets: [{ name, project }]
+ *  - onStart(names): starts the batch (POST /api/update-all)
+ *  - batch: the server's current batch summary, or null
  */
-export default function UpdateAllButton({ targets, runUpdate, disabled, onBatchDone }) {
-  const [running, setRunning] = useState(false);
+export default function UpdateAllButton({ targets, onStart, batch, disabled }) {
+  const [starting, setStarting] = useState(false);
+  const running = Boolean(batch && !batch.finishedAt);
 
   const handleClick = useCallback(async () => {
-    if (running || disabled || targets.length === 0) return;
-    setRunning(true);
-    const runOne = (name) =>
-      Promise.resolve(runUpdate(name))
-        .then((r) => ({ name, success: !!(r && r.success), message: (r && r.message) || '' }))
-        .catch((err) => ({ name, success: false, message: err?.message || '' }));
-
-    // One sequential lane per stack; standalone containers each get their own.
-    const lanes = new Map();
-    for (const t of targets) {
-      const key = t.project ? `p:${t.project}` : `c:${t.name}`;
-      if (!lanes.has(key)) lanes.set(key, []);
-      lanes.get(key).push(t.name);
+    if (starting || running || disabled || targets.length === 0) return;
+    setStarting(true);
+    try {
+      await onStart(targets.map((t) => t.name));
+    } finally {
+      setStarting(false);
     }
-    // Each run() resolves with { success, message }, so the dashboard can show
-    // one aggregate summary instead of making the user scroll every card.
-    const laneOutcomes = await Promise.all(
-      [...lanes.values()].map(async (names) => {
-        const out = [];
-        for (const name of names) out.push(await runOne(name));
-        return out;
-      })
-    );
-    const outcomes = laneOutcomes.flat();
-    setRunning(false);
-    if (onBatchDone) onBatchDone(outcomes);
-  }, [running, disabled, targets, runUpdate, onBatchDone]);
+  }, [starting, running, disabled, targets, onStart]);
 
   return (
     <button
       type="button"
       className="btn btn-primary btn-sm"
       onClick={handleClick}
-      disabled={disabled || running || targets.length === 0}
+      disabled={disabled || starting || running || targets.length === 0}
     >
-      {running && <span className="spinner" aria-hidden="true" />}
-      Update all
+      {(starting || running) && <span className="spinner" aria-hidden="true" />}
+      {running ? `${batch.done}/${batch.total} done` : 'Update all'}
     </button>
   );
 }

@@ -20,6 +20,7 @@ test('settings: defaults when nothing stored', () => {
     scheduleMode: 'daily',
     scheduleIntervalHours: 6,
     notifyOnFailure: true,
+    notifyBatchSummary: true,
     discordEnabled: false,
     discordWebhookUrl: '',
     tagUpdates: 'minor',

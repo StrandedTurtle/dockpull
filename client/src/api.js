@@ -121,6 +121,32 @@ export function startUpdate(name) {
   return post(`/update/${encodeURIComponent(name)}`);
 }
 
+// Queue updates for several containers at once; runs entirely on the server.
+// Returns { batchId, queued: [names], skipped: [{ name, reason }] }.
+export function updateAll(names) {
+  return post('/update-all', { names });
+}
+
+// The server's update queue: { jobs: [...], batch: {...}|null }.
+export function getJobs() {
+  return get('/jobs');
+}
+
+// A container's own recent output: { text, state, restartCount }.
+export function getContainerLogs(name, tail = 200) {
+  return get(`/containers/${encodeURIComponent(name)}/logs?tail=${tail}`);
+}
+
+// Revert automatically when an update of this container comes up unhealthy.
+export function setAutoRevert(name, enabled) {
+  return request('PUT', `/containers/${encodeURIComponent(name)}/auto-revert`, { enabled });
+}
+
+// The saved live log of one past update: { log }.
+export function getHistoryLog(id) {
+  return get(`/history/entry/${encodeURIComponent(id)}/log`);
+}
+
 export function revertUpdate(name) {
   return post(`/update/${encodeURIComponent(name)}/revert`);
 }

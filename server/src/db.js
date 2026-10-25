@@ -82,6 +82,10 @@ CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC
   if (!cols.includes('available_version')) {
     db.exec('ALTER TABLE update_events ADD COLUMN available_version TEXT');
   }
+  if (!cols.includes('download_bytes')) {
+    db.exec('ALTER TABLE update_events ADD COLUMN download_bytes INTEGER');
+    db.exec('ALTER TABLE update_events ADD COLUMN download_exact INTEGER');
+  }
   if (!cols.includes('breaking')) {
     db.exec('ALTER TABLE update_events ADD COLUMN breaking INTEGER DEFAULT 0');
   }
@@ -99,6 +103,17 @@ CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC
   if (!cols.includes('compose_edit')) db.exec('ALTER TABLE rollback_points ADD COLUMN compose_edit TEXT');
 }
 
+// update_history.log: the tail of the update's live log, so a failure can be
+// investigated after the fact. container_prefs: per-container options.
+{
+  const cols = db.prepare('PRAGMA table_info(update_history)').all().map((col) => col.name);
+  if (!cols.includes('log')) db.exec('ALTER TABLE update_history ADD COLUMN log TEXT');
+  db.exec(`CREATE TABLE IF NOT EXISTS container_prefs (
+    container_name TEXT PRIMARY KEY,
+    auto_revert INTEGER DEFAULT 0
+  )`);
+}
+
 // update_history: remember versions on the row itself, for when an image's
 // digest is unknown (so the digest→version lookup can't recover them later).
 {
@@ -108,6 +123,12 @@ CREATE INDEX IF NOT EXISTS idx_history_created ON update_history(created_at DESC
 }
 
 const stmts = {
+  getHistoryLog: db.prepare(`SELECT log FROM update_history WHERE id = ? LIMIT 1`),
+  getAutoRevert: db.prepare(`SELECT auto_revert FROM container_prefs WHERE container_name = ? LIMIT 1`),
+  setAutoRevert: db.prepare(`
+    INSERT INTO container_prefs (container_name, auto_revert) VALUES (?, ?)
+    ON CONFLICT(container_name) DO UPDATE SET auto_revert = excluded.auto_revert
+  `),
   importHistoryRow: db.prepare(`
     INSERT INTO update_history (container_name, image, old_digest, new_digest, old_version, new_version, status, message, created_at)
     VALUES (@container_name, @image, @old_digest, @new_digest, @old_version, @new_version, @status, @message, @created_at)
@@ -147,6 +168,10 @@ const stmts = {
       WHERE normalized_ref = ? AND resolved = 0
       ORDER BY id DESC LIMIT 1
     )
+  `),
+  setEventDownloadSize: db.prepare(`
+    UPDATE update_events SET download_bytes = ?, download_exact = ?
+    WHERE normalized_ref = ? AND digest = ? AND resolved = 0
   `),
   updateEventAvailableVersion: db.prepare(`
     UPDATE update_events SET available_version = ?
@@ -188,16 +213,16 @@ const stmts = {
     DELETE FROM rollback_points WHERE container_name = ?
   `),
   recordUpdate: db.prepare(`
-    INSERT INTO update_history (container_name, image, old_digest, new_digest, old_version, new_version, status, message)
-    VALUES (@container_name, @image, @old_digest, @new_digest, @old_version, @new_version, @status, @message)
+    INSERT INTO update_history (container_name, image, old_digest, new_digest, old_version, new_version, status, message, log)
+    VALUES (@container_name, @image, @old_digest, @new_digest, @old_version, @new_version, @status, @message, @log)
   `),
   getHistoryAll: db.prepare(`
-    SELECT * FROM update_history
+    SELECT id, container_name, image, old_digest, new_digest, old_version, new_version, status, message, created_at, (log IS NOT NULL AND log != '') AS has_log FROM update_history
     ORDER BY created_at DESC, id DESC
     LIMIT ? OFFSET ?
   `),
   getHistoryByContainer: db.prepare(`
-    SELECT * FROM update_history
+    SELECT id, container_name, image, old_digest, new_digest, old_version, new_version, status, message, created_at, (log IS NOT NULL AND log != '') AS has_log FROM update_history
     WHERE container_name = ?
     ORDER BY created_at DESC, id DESC
     LIMIT ? OFFSET ?
@@ -288,6 +313,11 @@ export function dismissTag(normalized_ref, tag) {
 
 export function markTagNotified(normalized_ref, key) {
   return stmts.markTagNotified.run(key ?? null, normalized_ref);
+}
+
+export function setEventDownloadSize(normalized_ref, digest, size) {
+  if (!size) return undefined;
+  return stmts.setEventDownloadSize.run(size.bytes, size.exact ? 1 : 0, normalized_ref, digest);
 }
 
 export function updateEventAvailableVersion(normalized_ref, digest, available_version) {
@@ -384,7 +414,7 @@ export function getAllRollbackPoints() {
   return stmts.getAllRollbackPoints.all();
 }
 
-export function recordUpdate({ container_name, image, old_digest, new_digest, old_version, new_version, status, message }) {
+export function recordUpdate({ container_name, image, old_digest, new_digest, old_version, new_version, status, message, log }) {
   return stmts.recordUpdate.run({
     container_name,
     image,
@@ -394,7 +424,22 @@ export function recordUpdate({ container_name, image, old_digest, new_digest, ol
     new_version: new_version ?? null,
     status,
     message: message ?? null,
+    log: log ? String(log).slice(-50_000) : null,
   });
+}
+
+/** The saved log for one history entry, or null. */
+export function getHistoryLog(id) {
+  return stmts.getHistoryLog.get(id)?.log ?? null;
+}
+
+/** Per-container "revert automatically if the update comes up unhealthy". */
+export function getAutoRevert(container_name) {
+  return Boolean(stmts.getAutoRevert.get(container_name)?.auto_revert);
+}
+
+export function setAutoRevert(container_name, enabled) {
+  return stmts.setAutoRevert.run(container_name, enabled ? 1 : 0);
 }
 
 export function getHistory({ containerName, limit = 50, offset = 0 } = {}) {

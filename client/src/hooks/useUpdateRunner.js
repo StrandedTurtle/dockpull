@@ -2,18 +2,37 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { startUpdate, revertUpdate, switchTag } from '../api.js';
 import { useSSE } from './useSSE.js';
 
+const KIND_LABEL = {
+  update: 'Updating…',
+  revert: 'Reverting…',
+  switch: 'Switching tag…',
+};
+
+function pendingMessage(job) {
+  if (!job) return 'Starting…';
+  if (job.status === 'queued') {
+    return job.waitingOn === 'stack'
+      ? 'Queued — waiting for other updates in this stack…'
+      : 'Queued — waiting for its turn…';
+  }
+  if (job.kind === 'switch' && job.tag) return `Switching to ${job.tag}…`;
+  return KIND_LABEL[job.kind] || 'Updating…';
+}
+
 /**
- * Owns the full lifecycle of "update this one container": POST the start
- * request, then stream logs/result over SSE, exposing a single `run()`
- * promise that resolves once the terminal SSE event (or a failure) has
- * been handled. Used by both the per-card Update button and the
- * "Update all" sequential batch (so both go through the exact same flow).
+ * One container's update / revert / tag switch, as seen from its card.
  *
- * `onSettled(name)` is called once, after the update finishes (success,
- * failure, or stream error), so the dashboard can re-fetch the container
- * list and clear its in-flight bookkeeping.
+ * The work runs on the server (a queued job — see server/src/jobs.js); this
+ * hook starts it and follows its live log over SSE. It also follows a job it
+ * did NOT start — from "Update all", another device, or before the user left
+ * this page — via the `job` prop (from the app-wide live state): whenever a
+ * new job id shows up for this container, it (re)attaches to the stream, which
+ * the server replays from the beginning.
+ *
+ * `onSettled(name)` runs once per job when it finishes, so the dashboard can
+ * refresh.
  */
-export function useUpdateRunner(name, onSettled) {
+export function useUpdateRunner(name, onSettled, job = null) {
   const [streamActive, setStreamActive] = useState(false);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState('');
@@ -21,18 +40,12 @@ export function useUpdateRunner(name, onSettled) {
 
   const { lines, result, error: sseError, reset } = useSSE(name, streamActive);
 
+  // The job id this card is currently showing, so each job attaches once.
+  const attachedJobRef = useRef(null);
+  // Settle exactly once per job (a stream error after the result mustn't
+  // overwrite it or trigger a second refresh).
+  const settledRef = useRef(true);
   const resolveRef = useRef(null);
-  // Ensures we settle (resolve the run promise + notify the dashboard) exactly
-  // once per run, so a connection error arriving after the result can't
-  // overwrite a success or trigger a second re-fetch.
-  const settledRef = useRef(false);
-  // The in-flight run's promise, if any. `run()` can be invoked through
-  // multiple paths (the per-card button, "Update all"'s sequential loop) --
-  // without this, a second call while one is already running would fire a
-  // second POST /api/update/:name and the server would correctly reject it
-  // with 409, surfacing as a spurious error even though the first call
-  // succeeds. Returning the same promise instead makes every caller await
-  // the one real update.
   const pendingRunRef = useRef(null);
 
   const settle = useCallback(
@@ -42,8 +55,6 @@ export function useUpdateRunner(name, onSettled) {
       pendingRunRef.current = null;
       onSettled(name);
       if (resolveRef.current) {
-        // Resolve the run() promise with the outcome so batch callers
-        // ("Update all") can summarize successes/failures per container.
         resolveRef.current(outcome || { success: false, message: '' });
         resolveRef.current = null;
       }
@@ -51,24 +62,35 @@ export function useUpdateRunner(name, onSettled) {
     [name, onSettled]
   );
 
-  // Shared start path for both "update" and "revert" — same SSE stream + result
-  // handling, only the kickoff request and the pending message differ.
+  const attach = useCallback(
+    (jobInfo) => {
+      settledRef.current = false;
+      reset();
+      setStartError('');
+      setStatus({ type: 'pending', message: pendingMessage(jobInfo) });
+      setStreamActive(true);
+    },
+    [reset]
+  );
+
+  // Start a job from this card. Returns a promise resolved when it finishes.
   const start = useCallback(
-    (starter, pendingMsg) => {
+    (starter) => {
       if (pendingRunRef.current) return pendingRunRef.current;
       const promise = new Promise((resolve) => {
         resolveRef.current = resolve;
         settledRef.current = false;
         setStartError('');
-        setStatus({ type: '', message: '' });
+        setStatus({ type: 'pending', message: 'Starting…' });
         reset();
         setStarting(true);
         starter(name)
-          .then(() => {
-            setStreamActive(true);
-            setStatus({ type: 'pending', message: pendingMsg });
+          .then((r) => {
+            attachedJobRef.current = r?.job?.id ?? attachedJobRef.current;
+            attach(r?.job);
           })
           .catch((err) => {
+            setStatus({ type: '', message: '' });
             setStartError(err.message || 'Failed to start');
             settle({ success: false, message: err.message || 'Failed to start' });
           })
@@ -77,15 +99,29 @@ export function useUpdateRunner(name, onSettled) {
       pendingRunRef.current = promise;
       return promise;
     },
-    [name, reset, settle]
+    [name, reset, settle, attach]
   );
 
-  const run = useCallback(() => start(startUpdate, 'Update started…'), [start]);
-  const revert = useCallback(() => start(revertUpdate, 'Reverting…'), [start]);
-  const switchTo = useCallback(
-    (tag) => start((n) => switchTag(n, tag), `Switching to ${tag}…`),
-    [start]
-  );
+  const run = useCallback(() => start(startUpdate), [start]);
+  const revert = useCallback(() => start(revertUpdate), [start]);
+  const switchTo = useCallback((tag) => start((n) => switchTag(n, tag)), [start]);
+
+  // Follow server-side jobs this card didn't start (or after a page change).
+  useEffect(() => {
+    if (!job || attachedJobRef.current === job.id) {
+      // Same job: keep the pending message current (queued -> running).
+      if (job && streamActive && (job.status === 'queued' || job.status === 'running')) {
+        setStatus((s) => (s.type === 'pending' ? { type: 'pending', message: pendingMessage(job) } : s));
+      }
+      return;
+    }
+    if (pendingRunRef.current && starting) return; // our own start; its response attaches
+    // The server keeps a finished job's log for 15 minutes; past that there's
+    // nothing to replay (History has it).
+    if (job.status === 'done' && Date.now() - (job.finishedAt || 0) > 14 * 60_000) return;
+    attachedJobRef.current = job.id;
+    attach(job);
+  }, [job, streamActive, starting, attach]);
 
   useEffect(() => {
     if (!result) return;
@@ -99,15 +135,21 @@ export function useUpdateRunner(name, onSettled) {
 
   useEffect(() => {
     if (!sseError) return;
-    // If the result already arrived, a subsequent stream error (e.g. the
-    // server closing the connection) is expected — don't clobber the result.
     if (result || settledRef.current) return;
     setStreamActive(false);
-    setStatus({ type: 'error', message: sseError });
-    settle({ success: false, message: sseError });
-  }, [sseError, result, settle]);
+    // The live log was lost, but the job may still be fine — show what the
+    // server last reported rather than claiming a failure.
+    if (job && job.status === 'done') {
+      setStatus({ type: job.success ? 'success' : 'error', message: job.message || '' });
+      settle({ success: !!job.success, message: job.message || '' });
+    } else {
+      setStatus({ type: 'error', message: sseError });
+      settle({ success: false, message: sseError });
+    }
+  }, [sseError, result, settle, job]);
 
-  const busy = starting || streamActive;
+  const jobActive = Boolean(job && (job.status === 'queued' || job.status === 'running'));
+  const busy = starting || streamActive || jobActive;
 
   return { run, revert, switchTo, busy, starting, startError, status, lines };
 }

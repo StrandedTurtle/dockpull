@@ -50,10 +50,28 @@ test('a finished session is still replayable during the grace period, then remov
     sse.subscribe('db', late);
     assert.match(late.chunks.join(''), /pulling[\s\S]*"success":true/);
 
-    mock.timers.tick(31_000);
+    mock.timers.tick(15 * 60_000 + 1000);
     const later = fakeRes();
     sse.subscribe('db', later);
     assert.match(later.chunks.join(''), /No active update/);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('logTail: last N lines, optionally only those after a cursor', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    sse.startSession('tail');
+    sse.pushLog('tail', 'update line 1');
+    sse.pushLog('tail', 'update line 2');
+    const cursor = sse.logCount('tail');
+    sse.pushLog('tail', 'revert line 1');
+    assert.equal(sse.logTail('tail', 200), 'update line 1\nupdate line 2\nrevert line 1');
+    assert.equal(sse.logTail('tail', 1), 'revert line 1');
+    assert.equal(sse.logTail('tail', 200, cursor), 'revert line 1');
+    assert.equal(sse.logTail('nope'), '');
+    sse.finish('tail', { success: true, message: 'ok' });
   } finally {
     mock.timers.reset();
   }

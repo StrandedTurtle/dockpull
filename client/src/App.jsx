@@ -7,6 +7,7 @@ import Dashboard from './Dashboard.jsx';
 import Header from './components/Header.jsx';
 import BottomNav from './components/BottomNav.jsx';
 import SelfUpdateBanner from './components/SelfUpdateBanner.jsx';
+import { LiveProvider } from './hooks/useLive.jsx';
 import HistoryPage from './pages/HistoryPage.jsx';
 import SettingsPage from './pages/SettingsPage.jsx';
 
@@ -85,6 +86,7 @@ export default function App() {
   }
 
   return (
+    <LiveProvider>
     <div className="app-shell">
       <Header pendingCount={pendingCount} needsPruning={needsPruning} onLoggedOut={handleLoggedOut} />
       <main className="app-main">
@@ -101,5 +103,6 @@ export default function App() {
       </main>
       <BottomNav needsPruning={needsPruning} />
     </div>
+    </LiveProvider>
   );
 }

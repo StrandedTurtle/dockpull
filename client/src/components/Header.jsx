@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { logout } from '../api.js';
 import { useTheme } from '../hooks/useTheme.js';
+import { useLive, isActiveJob } from '../hooks/useLive.jsx';
 
 const LogoutIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -48,6 +49,17 @@ const MoonIcon = () => (
 export default function Header({ pendingCount = 0, needsPruning = false, onLoggedOut }) {
   const [loggingOut, setLoggingOut] = useState(false);
   const { theme, toggle } = useTheme();
+  const { jobs, batch } = useLive();
+
+  // "Updating 2 of 5" while anything is queued/running on the server — seen
+  // from every page, so leaving the dashboard no longer hides progress.
+  const activeJobs = jobs.filter(isActiveJob);
+  const batchActive = batch && !batch.finishedAt;
+  const progress = activeJobs.length
+    ? batchActive
+      ? `Updating · ${batch.done}/${batch.total} done`
+      : `Updating ${activeJobs.length}`
+    : null;
 
   const handleLogout = async () => {
     if (loggingOut) return;
@@ -69,6 +81,12 @@ export default function Header({ pendingCount = 0, needsPruning = false, onLogge
         <span>DockPull</span>
         {pendingCount > 0 && <span className="badge">{pendingCount}</span>}
       </Link>
+      {progress && (
+        <Link to="/" className="header-progress" title="Updates in progress — tap to watch">
+          <span className="spinner" aria-hidden="true" />
+          <span>{progress}</span>
+        </Link>
+      )}
       <nav className="header-nav" aria-label="Primary">
         <NavLink to="/" end className={({ isActive }) => `header-nav-link${isActive ? ' is-active' : ''}`}>
           Updates

@@ -173,3 +173,39 @@ test('healthWaitPlan: waits as long as the container\'s own healthcheck needs', 
   assert.equal(healthWaitPlan({ Test: ['CMD', 'x'], StartPeriod: 3600 * s }).timeoutMs, 900_000);
   assert.equal(healthWaitPlan({ Test: ['CMD', 'x'], Interval: 1 * s, Timeout: 1 * s, Retries: 1 }).timeoutMs, 30_000);
 });
+
+import { demuxDockerLogs } from '../src/docker.js';
+
+test('demuxDockerLogs: strips frame headers from stdout/stderr frames', () => {
+  const frame = (stream, text) => {
+    const payload = Buffer.from(text);
+    const h = Buffer.alloc(8);
+    h[0] = stream;
+    h.writeUInt32BE(payload.length, 4);
+    return Buffer.concat([h, payload]);
+  };
+  const buf = Buffer.concat([frame(1, 'hello\n'), frame(2, 'oops\n'), frame(1, 'bye\n')]);
+  assert.equal(demuxDockerLogs(buf), 'hello\noops\nbye\n');
+});
+
+test('demuxDockerLogs: raw TTY text passes through unchanged', () => {
+  assert.equal(demuxDockerLogs(Buffer.from('plain tty output\n')), 'plain tty output\n');
+  assert.equal(demuxDockerLogs(Buffer.alloc(0)), '');
+});
+
+import { mapLimit } from '../src/docker.js';
+
+test('mapLimit: preserves order and never exceeds the limit', async () => {
+  let active = 0;
+  let max = 0;
+  const out = await mapLimit([5, 1, 4, 2, 3, 0], 3, async (n) => {
+    active += 1;
+    max = Math.max(max, active);
+    await new Promise((r) => setTimeout(r, n * 3));
+    active -= 1;
+    return n * 10;
+  });
+  assert.deepEqual(out, [50, 10, 40, 20, 30, 0]);
+  assert.equal(max, 3);
+  assert.deepEqual(await mapLimit([], 3, async () => 1), []);
+});

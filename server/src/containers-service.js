@@ -39,6 +39,7 @@ export function buildContainerItems({
   getRollback = () => null,
   getCheckError = () => null,
   getTagUpdate = () => null,
+  getAutoRevert = () => false,
   tagPolicy = 'minor',
 }) {
   const items = [];
@@ -107,10 +108,15 @@ export function buildContainerItems({
       // must not leak through once the digests match again.
       breakingRisk: !!(updateAvailable && event?.breaking),
       skipped,
+      // Bytes the update will download (new layers only), when known.
+      downloadSize: (updateAvailable || skipped) && event?.download_bytes != null
+        ? { bytes: event.download_bytes, exact: Boolean(event.download_exact) }
+        : null,
       newerTag,
       newerMajorTag,
       pinned: isPinned(c.normalizedRef),
       canRevert: !!rollback,
+      autoRevert: getAutoRevert(c.name),
       rollbackVersion: rollback?.old_version ?? null,
       checkError: getCheckError(c.normalizedRef),
       state: c.state,

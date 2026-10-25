@@ -93,14 +93,48 @@ All request/response bodies are JSON unless noted otherwise.
 - Auth: cookie.
 - Path param: `name` — container name.
 - Body: none.
-- Response: `200 { "streamId": "string" }` — starts a pull + recreate
-  operation for that container; use the returned `streamId` to subscribe to
-  progress via the SSE endpoint below.
+- Response: `200 { "streamId": "string", "job": {...} }` — queues a pull +
+  recreate for that container on the server (see `GET /api/jobs`); subscribe to
+  progress via the SSE endpoint below. The stream replays the whole log on every
+  (re)connect and is kept for 15 minutes after the job finishes.
 - Errors: `404` if no such container; `409` if an update is already in
   progress for that container.
 - Note: after `up -d`, the container is health-checked; if it doesn't come up
   healthy the result is reported as `success:false` with an actionable message
   (and a rollback point is recorded).
+
+### `POST /api/update-all`
+
+- Auth: cookie. Body: `{ "names": [string] }` (container names, ≤ 500).
+- Queues an update for each, as one batch, run on the server (one at a time
+  within a compose project, up to 3 at once overall) — nothing needs to stay
+  connected. When the last finishes, one summary notification is sent (if
+  notifications and `notifyBatchSummary` are on, and the batch had ≥ 2).
+- Response: `200 { "batchId", "queued": [name], "skipped": [{ "name", "reason" }] }`;
+  `400 invalid_payload`.
+
+### `GET /api/jobs`
+
+- Auth: cookie. The server's update queue: queued/running jobs plus those
+  finished in the last 15 minutes, and the latest batch.
+- Response: `200 { "jobs": [{ "id", "name", "kind": "update"|"revert"|"switch", "project", "batchId", "status": "queued"|"running"|"done", "waitingOn": "stack"|"slot"|null, "queuedAt", "startedAt", "finishedAt", "success", "message", "tag"? }], "batch": { "id", "total", "done", "succeeded": [name], "failed": [{ "name", "message" }], "startedAt", "finishedAt" }|null }`.
+- `GET /api/events` emits `{"type":"jobs-changed"}` whenever this changes.
+
+### `PUT /api/containers/:name/auto-revert`
+
+- Auth: cookie. Body: `{ "enabled": boolean }`. When on, an update or tag switch
+  of this container that comes up unhealthy is reverted automatically in the
+  same job. Container items report it as `autoRevert`.
+
+### `GET /api/containers/:name/logs`
+
+- Auth: cookie. Query: `tail` (default 200, max 1000). The container's own
+  recent stdout/stderr. Response: `200 { "text", "state", "restartCount" }`.
+
+### `GET /api/history/entry/:id/log`
+
+- Auth: cookie. The saved live log of one update (history rows carry
+  `has_log`). Response: `200 { "log" }`; `404 not_found`.
 
 ### `POST /api/update/:name/revert`
 
@@ -128,7 +162,7 @@ All request/response bodies are JSON unless noted otherwise.
   pull/up fails before the container changed, the file is restored. Standalone:
   pulls the new tag and recreates the container on it. The rollback point records
   the compose edit, so a revert puts the old tag back in the file.
-- Response: `200 { "streamId": "string" }` (stream as for updates).
+- Response: `200 { "streamId": "string", "job": {...} }` (stream as for updates).
 - Errors: `400 invalid_tag`; `409 tag_not_offered`; `409 update_in_progress`;
   `404 not_found`.
 
@@ -399,6 +433,11 @@ Field notes:
   tag of a higher major version, only when the `tagUpdates` setting is `major`.
   Both respect a skipped tag (`POST /api/skip-tag`) and are `null` when
   `tagUpdates` is `off`.
+- `downloadSize` — `{ "bytes": number, "exact": boolean }` for a pending (or
+  skipped) update: the compressed size of the new image's layers the running
+  image doesn't have; `exact: false` means the running image's manifest
+  couldn't be read, so it's the whole image (an upper bound). `null` if unknown.
+- `autoRevert` — per-container auto-revert (see `PUT .../auto-revert`).
 - `skipped` — `true` when an update exists but the user skipped that exact
   build (`POST /api/skip`); `updateAvailable` is then `false`, while
   `availableDigest`/`availableVersion` still describe the skipped build.

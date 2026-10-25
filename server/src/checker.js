@@ -8,7 +8,7 @@
  */
 
 import { listContainers } from './docker.js';
-import { getRemoteDigest, getRemoteVersion, listTags } from './registry.js';
+import { getRemoteDigest, getRemoteVersion, listTags, getDownloadSize } from './registry.js';
 import { digestsEqual, isRunningDigest } from './reconcile.js';
 import { isMeaningfulVersion, parseVersionTag, findNewerTags } from './version.js';
 import { parseRef } from './reconcile.js';
@@ -202,6 +202,10 @@ async function doCheck() {
         // repeated checks).
         const existing = db.latestUnresolvedEventForRef(c.normalizedRef);
         if (existing && digestsEqual(existing.digest, remote)) {
+          // Backfill the download size for updates found before it was tracked.
+          if (existing.download_bytes == null) {
+            db.setEventDownloadSize(c.normalizedRef, remote, await getDownloadSize(c.image, remote, c.currentDigest));
+          }
           // Already flagged. If we previously stored a junk version label
           // (e.g. "main"), try to backfill a real one now without waiting for
           // a new image to appear.
@@ -234,6 +238,8 @@ async function doCheck() {
           breaking,
           raw_json: JSON.stringify({ source: 'check' }),
         });
+        // How much the update will download (new layers only). Best-effort.
+        db.setEventDownloadSize(c.normalizedRef, remote, await getDownloadSize(c.image, remote, c.currentDigest));
         // Remember versions per digest: the available one keyed by the remote
         // digest (so it shows instantly once the user updates), and the running
         // one if its own label is usable.

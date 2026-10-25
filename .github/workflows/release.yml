@@ -56,6 +56,9 @@ jobs:
     name: Build and push to GHCR
     needs: verify
     runs-on: ubuntu-latest
+    # A normal build takes ~4 minutes. Fail loudly on a stall instead of
+    # hanging for GitHub's 6-hour default with `:latest` silently stale.
+    timeout-minutes: 25
     permissions:
       contents: read
       packages: write
@@ -113,8 +116,16 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Separate cache scopes for branch and tag builds. A release pushes
+          # `main` and the `vX.Y.Z` tag seconds apart, so both builds run at
+          # once (different refs, different concurrency groups); writing the
+          # same gha cache scope concurrently stalled the `:latest` build for
+          # 12+ minutes on v1.8.0. Tag builds still READ main's cache, so they
+          # stay fast, but each writes only its own scope.
+          cache-from: |
+            type=gha,scope=main
+            type=gha,scope=${{ github.ref_type == 'tag' && 'release' || 'main' }}
+          cache-to: type=gha,mode=max,scope=${{ github.ref_type == 'tag' && 'release' || 'main' }}
 
   # NOTE: the GitHub Release itself is created by release-please.yml (with a
   # changelog grouped by feat/fix/deps), not here — it creates the git tag as a

@@ -15,14 +15,19 @@ process.env.DATA_DIR = tmp;
 const D = (c) => `sha256:${c.repeat(64)}`;
 
 // --- fake registry ------------------------------------------------------
-const registry = { digests: {}, tags: {}, hits: [] }; // digests["app:1.0.0"] = digest
+const registry = { digests: {}, tags: {}, manifests: {}, hits: [] }; // digests["app:1.0.0"] = digest
 const regServer = http.createServer((req, res) => {
   registry.hits.push(`${req.method} ${req.url}`);
   const m = /^\/v2\/(.+)\/(manifests|tags)\/(.+?)(\?.*)?$/.exec(req.url);
   if (!m) return res.writeHead(404).end();
   const [, repo, kind, rest] = m;
   if (kind === 'manifests') {
-    const digest = registry.digests[`${repo}:${decodeURIComponent(rest)}`];
+    const ref = decodeURIComponent(rest);
+    if (ref.startsWith('sha256:') && registry.manifests[ref]) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(registry.manifests[ref]));
+    }
+    const digest = registry.digests[`${repo}:${ref}`];
     if (!digest) return res.writeHead(404).end();
     res.writeHead(200, { 'Docker-Content-Digest': digest, 'Content-Type': 'application/json' });
     return res.end(req.method === 'HEAD' ? undefined : '{}');
@@ -81,6 +86,7 @@ function reset() {
   docker.images = {};
   registry.digests = {};
   registry.tags = {};
+  registry.manifests = {};
   registry.hits = [];
   db.db.exec('DELETE FROM update_events; DELETE FROM tag_updates;');
 }
@@ -161,4 +167,19 @@ test('concurrent checks share one run (no duplicate registry calls or events)', 
   assert.equal(registry.hits.filter((h) => h.startsWith('HEAD')).length, 1);
   const n = db.db.prepare('SELECT COUNT(*) AS n FROM update_events WHERE resolved = 0').get().n;
   assert.equal(n, 1);
+});
+
+test('records how much an update will download (only layers not already present)', async () => {
+  reset();
+  const ref = `${REG}/app:latest`;
+  addImage(D('1'), { repoDigests: [`${REG}/app@${D('a')}`], tagRef: ref });
+  docker.containers.web = { image: ref, imageId: D('1') };
+  registry.digests['app:latest'] = D('f');
+  const base = { digest: D('9'), size: 50_000_000 };
+  registry.manifests[D('a')] = { layers: [base, { digest: D('7'), size: 3_000_000 }] };
+  registry.manifests[D('f')] = { layers: [base, { digest: D('8'), size: 4_000_000 }] };
+  await runCheck();
+  const ev = db.latestUnresolvedEventForRef(`${REG}/app:latest`);
+  assert.equal(ev.download_bytes, 4_000_000);
+  assert.equal(ev.download_exact, 1);
 });
