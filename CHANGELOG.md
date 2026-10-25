@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.9.0](https://github.com/StrandedTurtle/dockpull/compare/v1.8.0...v1.9.0) (2026-10-25)
+
+
+### Features
+
+* server-side update queue, update logs, container logs, auto-revert, download sizes ([#117](https://github.com/StrandedTurtle/dockpull/issues/117)) ([89c291d](https://github.com/StrandedTurtle/dockpull/commit/89c291df93ff1d20df840afeb847ca02fcfd5157))
+
+
+### Bug Fixes
+
+* **deps-dev:** bump vite from 8.3.2 to 8.3.5 in /client ([#115](https://github.com/StrandedTurtle/dockpull/issues/115)) ([faa47fc](https://github.com/StrandedTurtle/dockpull/commit/faa47fc6fa38621648780110c9632545fc3242cb))
+* **deps:** bump dotenv in /server in the server-minor-patch group ([#110](https://github.com/StrandedTurtle/dockpull/issues/110)) ([61f16c1](https://github.com/StrandedTurtle/dockpull/commit/61f16c19aff5eea8648fa3f77c47ff56a4373ccf))
+* **deps:** bump proxy-addr from 2.0.7 to 2.0.8 in /server ([#112](https://github.com/StrandedTurtle/dockpull/issues/112)) ([72f9813](https://github.com/StrandedTurtle/dockpull/commit/72f9813d1713c59b02b362d5195f406d0f3f32e2))
+* **deps:** bump source-map-js from 1.2.1 to 1.2.2 in /client ([#111](https://github.com/StrandedTurtle/dockpull/issues/111)) ([f2cf6ee](https://github.com/StrandedTurtle/dockpull/commit/f2cf6ee4ec7bbcb2a9d3551af95127cb637f3b65))
+
 ## [1.8.0](https://github.com/StrandedTurtle/dockpull/compare/v1.7.3...v1.8.0) (2026-10-05)
 
 
