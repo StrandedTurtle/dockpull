@@ -574,6 +574,28 @@ export default function SettingsPage({ onPruneComplete } = {}) {
         </div>
         <div className="settings-row">
           <div className="settings-row-label">
+            <span>"Update all" summary</span>
+            <span className="settings-row-desc">
+              One message when an Update all finishes — handy when you start it and walk away.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="theme-switch"
+            role="switch"
+            aria-checked={!!settings?.notifyBatchSummary}
+            aria-label="Toggle Update all summary notifications"
+            onClick={() => saveSetting({ notifyBatchSummary: !settings?.notifyBatchSummary }).catch(() => {})}
+            disabled={!settings || !settings?.discordEnabled}
+          >
+            <span className="theme-switch-track">
+              <span className="theme-switch-thumb" />
+            </span>
+            <span className="theme-switch-text">{settings?.notifyBatchSummary ? 'On' : 'Off'}</span>
+          </button>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-label">
             <span>Notify on failures</span>
             <span className="settings-row-desc">
               Also send a message when an update or revert fails, or comes up unhealthy.

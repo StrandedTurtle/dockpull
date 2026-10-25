@@ -83,7 +83,15 @@ function queueUpdate(name, inspectData, { batchId = null, run, kind = 'update', 
     execute: () => executeUpdate(name, image, run),
   });
   sse.startSession(name);
-  if (project) sse.pushLog(name, `Queued (updates in stack "${project}" run one at a time)…`, 'stdout');
+  if (job.status === 'queued') {
+    sse.pushLog(
+      name,
+      job.waitingOn === 'stack'
+        ? `Queued — updates in stack "${project}" run one at a time…`
+        : 'Queued — waiting for a free slot (up to 3 updates run at once)…',
+      'stdout'
+    );
+  }
   return job;
 }
 

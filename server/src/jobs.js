@@ -116,9 +116,13 @@ export function enqueue({ name, kind, project = null, batchId = null, meta = {},
 
   const laneKey = project ? `p:${project}` : `c:${name}`;
   const prev = lanes.get(laneKey) || Promise.resolve();
+  // Why it's waiting, for the UI: another update in its stack, or just the
+  // parallel cap.
+  job.waitingOn = lanes.has(laneKey) ? 'stack' : running >= MAX_PARALLEL ? 'slot' : null;
   const tail = prev.then(async () => {
     await acquireSlot();
     job.status = 'running';
+    job.waitingOn = null;
     job.startedAt = Date.now();
     emit('change', publicJob(job));
     let outcome;

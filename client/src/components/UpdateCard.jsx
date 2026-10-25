@@ -1,9 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { pin, unpin, skipUpdate, unskipUpdate, skipTag, getChangelog } from '../api.js';
+import { pin, unpin, skipUpdate, unskipUpdate, skipTag, getChangelog, getContainerLogs, setAutoRevert } from '../api.js';
 import { useUpdateRunner } from '../hooks/useUpdateRunner.js';
 import StatusMessage from './StatusMessage.jsx';
 import StreamLog from './StreamLog.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
+
+function formatSize(bytes) {
+  if (!Number.isFinite(bytes)) return '';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(bytes < 10 * 1024 ** 2 ? 1 : 0)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
 
 function shortDigest(digest) {
   if (!digest) return '—';
@@ -144,10 +151,11 @@ function ChangelogContent({ data }) {
  *  - container: item shape from GET /api/containers
  *  - onSettled(name) — called once an update for this container finishes
  *  - onPinChange() — called after a pin/unpin so the dashboard can refresh
- *  - registerRunner(name, runFn) — handle for "Update all"
+ *  - job — this container's server-side job (queued/running/recently done),
+ *    from the app-wide live state; the card attaches to its live log.
  */
-export default function UpdateCard({ container, onSettled, onPinChange, registerRunner }) {
-  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, breakingRisk, skipped, newerTag, newerMajorTag, pinned, sourceUrl, canRevert, rollbackVersion, checkError, state, composeFile } =
+export default function UpdateCard({ container, onSettled, onPinChange, job = null }) {
+  const { name, project, service, image, currentDigest, availableVersion, availableDigest, updateAvailable, breakingRisk, skipped, newerTag, newerMajorTag, pinned, sourceUrl, canRevert, rollbackVersion, checkError, state, composeFile, downloadSize, autoRevert } =
     container;
 
   const [pinBusy, setPinBusy] = useState(false);
@@ -159,15 +167,45 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
   const [clData, setClData] = useState(null);
   const [clError, setClError] = useState('');
 
-  const { run, revert, switchTo, busy, startError, status, lines } = useUpdateRunner(name, onSettled);
+  const { run, revert, switchTo, busy, startError, status, lines } = useUpdateRunner(name, onSettled, job);
   const [confirmTag, setConfirmTag] = useState(null);
 
-  useEffect(() => {
-    if (registerRunner) registerRunner(name, run);
-    return () => {
-      if (registerRunner) registerRunner(name, null);
-    };
-  }, [registerRunner, name, run]);
+  // Container's own output (e.g. why an update crash-loops).
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logsData, setLogsData] = useState(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState('');
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true);
+    setLogsError('');
+    try {
+      setLogsData(await getContainerLogs(name, 200));
+    } catch (err) {
+      setLogsError(err.message || 'Failed to load logs');
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [name]);
+  const toggleLogs = useCallback(() => {
+    setLogsOpen((open) => {
+      if (!open) loadLogs();
+      return !open;
+    });
+  }, [loadLogs]);
+
+  const [autoRevertBusy, setAutoRevertBusy] = useState(false);
+  const toggleAutoRevert = useCallback(async () => {
+    setAutoRevertBusy(true);
+    setActionError('');
+    try {
+      await setAutoRevert(name, !autoRevert);
+      if (onPinChange) onPinChange();
+    } catch (err) {
+      setActionError(err.message || 'Failed to change auto-revert');
+    } finally {
+      setAutoRevertBusy(false);
+    }
+  }, [name, autoRevert, onPinChange]);
 
   const handleUpdateClick = useCallback(() => {
     if (busy) return;
@@ -316,6 +354,19 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
                   ? availableVersion
                   : 'newer image'}
             </span>
+            {downloadSize && (
+              <span
+                className="download-size"
+                title={
+                  downloadSize.exact
+                    ? 'New layers to download (layers you already have are reused)'
+                    : 'Size of the whole new image — some layers may already be on disk'
+                }
+              >
+                {downloadSize.exact ? '' : '≤ '}
+                {formatSize(downloadSize.bytes)}
+              </span>
+            )}
             {breakingRisk && (
               <span className="breaking-flag" title="Release notes mention possible breaking changes">⚠️</span>
             )}
@@ -465,7 +516,37 @@ export default function UpdateCard({ container, onSettled, onPinChange, register
         </div>
       )}
 
-      <StreamLog lines={lines} />
+      {logsOpen && (
+        <div className="changelog-panel container-logs">
+          <div className="container-logs-head">
+            <span>
+              Container output
+              {logsData && ` — ${logsData.state}${logsData.restartCount ? `, restarted ${logsData.restartCount}×` : ''}`}
+            </span>
+            <button type="button" className="btn-ghost" onClick={loadLogs} disabled={logsLoading}>
+              {logsLoading ? 'Loading…' : 'Refresh'}
+            </button>
+          </div>
+          {logsError && <StatusMessage type="error" message={logsError} />}
+          {logsData && <pre className="changelog-body container-logs-body">{logsData.text || '(no output)'}</pre>}
+        </div>
+      )}
+
+      <div className="card-footer-row">
+        <StreamLog lines={lines} defaultOpen={busy} />
+        <span className="card-footer-actions">
+          <button type="button" className="stream-log-toggle" onClick={toggleLogs} aria-expanded={logsOpen}>
+            {logsOpen ? 'Hide container logs' : 'Container logs'}
+          </button>
+          <label
+            className="card-option"
+            title="If an update or tag switch comes up unhealthy, put the previous version back automatically"
+          >
+            <input type="checkbox" checked={!!autoRevert} onChange={toggleAutoRevert} disabled={autoRevertBusy} />
+            Auto-revert if unhealthy
+          </label>
+        </span>
+      </div>
     </div>
   );
 }

@@ -89,3 +89,14 @@ test('snapshot keeps finished jobs for a while, then forgets them', async () => 
   assert.equal(jobs.snapshot().jobs.length, 1);
   assert.equal(jobs.snapshot(Date.now() + 16 * 60_000).jobs.length, 0);
 });
+
+test('a queued job says why it waits: its stack, or the parallel cap', async () => {
+  const r = recorder();
+  for (const n of ['a', 'b', 'c']) jobs.enqueue({ name: n, kind: 'update', project: n, execute: r.make(n, 30) });
+  const sameStack = jobs.enqueue({ name: 'a2', kind: 'update', project: 'a', execute: r.make('a2') });
+  assert.equal(sameStack.waitingOn, 'stack');
+  await new Promise((res) => setTimeout(res, 5)); // let a, b, c take the 3 slots
+  const capped = jobs.enqueue({ name: 'd', kind: 'update', project: 'd', execute: r.make('d') });
+  assert.equal(capped.waitingOn, 'slot');
+  await jobs._drain();
+});

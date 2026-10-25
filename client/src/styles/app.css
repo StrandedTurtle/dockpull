@@ -1682,3 +1682,96 @@ a {
   color: var(--color-text-muted);
   font-size: 0.8rem;
 }
+
+/* ---------- Live update progress (header) ---------- */
+.header-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.header-progress .spinner {
+  width: 10px;
+  height: 10px;
+  border-width: 2px;
+  border-color: currentColor;
+  border-right-color: transparent;
+}
+
+/* ---------- Card: download size, footer options, container logs ---------- */
+.download-size {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.card-footer-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.card-footer-row > div:first-child {
+  flex: 1 1 100%;
+  order: 2;
+}
+
+.card-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  order: 1;
+  width: 100%;
+}
+
+.card-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.card-option input {
+  accent-color: var(--color-accent);
+}
+
+.container-logs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+}
+
+.container-logs-body {
+  max-height: 320px;
+  overflow: auto;
+  font-size: 0.72rem;
+}
+
+.history-row-log {
+  margin-top: 8px;
+}
+
+.history-log-body {
+  max-height: 320px;
+  overflow: auto;
+  font-size: 0.72rem;
+  cursor: text;
+}

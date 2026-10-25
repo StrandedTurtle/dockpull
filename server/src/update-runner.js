@@ -155,12 +155,16 @@ export async function executeUpdate(name, image, run = updateContainer) {
     if (rollback) {
       sse.pushLog(name, '— Unhealthy after updating; reverting automatically (auto-revert is on). —', 'stdout');
       const reverted = await performRevert(name, rollback.image_ref ?? image, rollback);
+      // "Image updated, but <reason>. The new version may be broken — …" ->
+      // just the reason; the advice to revert no longer applies.
+      const reason = /but (.+?)\. The new version/.exec(outcome.message)?.[1] || 'it came up unhealthy';
+      const prev = rollback.old_version ? `version ${rollback.old_version}` : 'the previous image';
       outcome = reverted.success
-        ? {
+        ? { success: false, message: `The update didn't work (${reason}), so it was automatically reverted to ${prev}.` }
+        : {
             success: false,
-            message: `${outcome.message} It was automatically reverted to ${rollback.old_version || 'the previous image'}.`,
-          }
-        : { success: false, message: `${outcome.message} Automatic revert also failed: ${reverted.message}` };
+            message: `The update didn't work (${reason}), and the automatic revert also failed: ${reverted.message}`,
+          };
     }
   }
   sse.finish(name, outcome);
