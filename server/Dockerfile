@@ -14,15 +14,25 @@ COPY client/ ./
 RUN npm run build
 
 # ---- Stage 2: server dependencies ----
-# better-sqlite3 is a native module with no musl (Alpine) prebuilt binary, so
-# it must be compiled from source here — which needs a toolchain. Doing it in a
-# dedicated stage keeps python3/make/g++ out of the final image. This stage
-# runs on the TARGET platform, so the compiled binary matches the runtime arch.
-FROM node:22-alpine AS server-deps
-RUN apk add --no-cache python3 make g++
+# Built on the BUILD machine's own CPU (like the client), not under QEMU
+# emulation: `npm ci` for linux/arm64 under QEMU intermittently died with
+# "qemu: uncaught target signal 4 (Illegal instruction)", and buildx then hung
+# instead of failing (it stalled the `:latest` builds of v1.8.0 and v1.9.0).
+#
+# Nothing here needs compiling for the target CPU, so the result is the same
+# for every platform: the deps are plain JS, and better-sqlite3 ships prebuilt
+# binaries for each platform inside the package and picks the right one at
+# runtime (prebuilds/linuxmusl-<arch>.node). --ignore-scripts skips its
+# redundant node-gyp step, ssh2/cpu-features' optional native speedups (only
+# used for Docker-over-SSH, which DockPull doesn't use; they fall back to JS),
+# and protobufjs's warning-only postinstall. No compiler toolchain needed.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS server-deps
 WORKDIR /app
 COPY server/package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts \
+  && find node_modules/better-sqlite3/prebuilds -type f ! -name 'linuxmusl-*' -delete \
+  && test -f node_modules/better-sqlite3/prebuilds/linuxmusl-x64.node \
+  && test -f node_modules/better-sqlite3/prebuilds/linuxmusl-arm64.node
 
 # ---- Stage 3: server runtime ----
 FROM node:22-alpine
